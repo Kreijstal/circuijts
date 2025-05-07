@@ -62,11 +62,16 @@ def ast_to_graph(parsed_statements):
         - Attribute: 'terminal' (e.g., 'G', 'D', 't1_series') indicating the
           component terminal involved in the connection.
     """
-    G = nx.Graph()
+    G = nx.MultiGraph()  # Changed from Graph() to properly handle multiple terminals to same net
     # Store component declarations: name -> {type, line, instance_node_name (same as name)}
     declared_components = {}
     # DSU to manage equivalence classes of electrical net names
     electrical_nets_dsu = DSU()
+
+    # Initialize special nodes like GND and VDD in DSU first
+    # This ensures they become canonical representatives for their sets
+    for special_node in ['GND', 'VDD']:
+        electrical_nets_dsu.add_set(special_node)
 
     implicit_node_idx = 0
     # For naming internally generated components like VCCS from parallel blocks
@@ -130,14 +135,20 @@ def ast_to_graph(parsed_statements):
                 G.add_edge(comp_node_name, canonical_net_name, terminal=terminal_name)
 
         elif stmt_type == 'direct_assignment':
-            # These two net names are declared to be the same net.
-            electrical_nets_dsu.union(stmt['source_node'], stmt['target_node'])
+            s_node, t_node = stmt['source_node'], stmt['target_node']
+            electrical_nets_dsu.union(s_node, t_node)
+            canonical_net = electrical_nets_dsu.find(s_node)  # Both s_node and t_node now map to same canonical net
 
-            # Ensure canonical nodes exist in graph (if not already from pre-sscan or other stmts)
-            for raw_node_name in [stmt['source_node'], stmt['target_node']]:
-                canonical_name = electrical_nets_dsu.find(raw_node_name)
-                if not G.has_node(canonical_name):
-                    G.add_node(canonical_name, node_kind='electrical_net')
+            # Ensure the canonical net exists in graph
+            if not G.has_node(canonical_net):
+                G.add_node(canonical_net, node_kind='electrical_net')
+            
+            # Handle device terminals in direct assignments
+            for node_name in [s_node, t_node]:
+                if '.' in node_name:  # It's a device terminal like M1.D
+                    comp_name, term = node_name.split('.', 1)
+                    if comp_name in declared_components:
+                        G.add_edge(comp_name, canonical_net, terminal=term)
 
         elif stmt_type == 'series_connection':
             path = stmt.get('path', [])
@@ -236,8 +247,8 @@ def ast_to_graph(parsed_statements):
                             if not G.has_node(element_node_name_in_graph):
                                 G.add_node(element_node_name_in_graph, **attrs)
                             # Generic terminal names for elements within a parallel block
-                            G.add_edge(element_node_name_in_graph, parallel_start_node_canonical, terminal='par_t1')
-                            G.add_edge(element_node_name_in_graph, parallel_end_node_canonical, terminal='par_t2')
+                            G.add_edge(element_node_name_in_graph, parallel_start_node_canonical, terminal='par_t1', key='par_t1')
+                            G.add_edge(element_node_name_in_graph, parallel_end_node_canonical, terminal='par_t2', key='par_t2')
 
                     current_attach_point_canonical = parallel_end_node_canonical
                     if is_next_point_implicit: implicit_node_idx += 1
@@ -311,11 +322,15 @@ def get_component_connectivity(graph, comp_name):
     """ Helper to find nets a component is connected to and via which terminals. """
     connections = {} # terminal_name -> canonical_net_name
     raw_connections = [] # list of {'term': ..., 'net_canon': ...} for ordering later if needed
-    for _, neighbor_net_canonical, edge_data in graph.edges(comp_name, data=True):
+    
+    # For MultiGraph, we need to handle potentially multiple edges per node pair
+    for u, v, edge_data in graph.edges(comp_name, data=True):
+        neighbor_net_canonical = v if u == comp_name else u
         if graph.nodes[neighbor_net_canonical].get('node_kind') == 'electrical_net':
             terminal = edge_data.get('terminal')
             if terminal:
-                connections[terminal] = neighbor_net_canonical
+                if terminal not in connections:  # Keep first occurrence of each terminal
+                    connections[terminal] = neighbor_net_canonical
                 raw_connections.append({'term': terminal, 'net_canon': neighbor_net_canonical})
     return connections, raw_connections
 
