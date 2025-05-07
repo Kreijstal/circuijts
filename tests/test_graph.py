@@ -1,3 +1,4 @@
+
 import pytest
 from circuijt.parser import ProtoCircuitParser
 from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
@@ -79,8 +80,10 @@ def test_parallel_graph():
     edge_data_r1_gnd = list(edge_data_r1_gnd.values())[0] if edge_data_r1_gnd else None
     assert {edge_data_r1_out['terminal'], edge_data_r1_gnd['terminal']} == {'par_t1', 'par_t2'}
 
-    edge_data_c1_out = graph.get_edge_data('C1', out_canonical) or graph.get_edge_data(out_canonical, 'C1')
-    edge_data_c1_gnd = graph.get_edge_data('C1', gnd_canonical) or graph.get_edge_data(gnd_canonical, 'C1')
+    edge_data_c1_out_map = graph.get_edge_data('C1', out_canonical)
+    edge_data_c1_gnd_map = graph.get_edge_data('C1', gnd_canonical)
+    edge_data_c1_out = list(edge_data_c1_out_map.values())[0] if edge_data_c1_out_map else None
+    edge_data_c1_gnd = list(edge_data_c1_gnd_map.values())[0] if edge_data_c1_gnd_map else None
     assert {edge_data_c1_out['terminal'], edge_data_c1_gnd['terminal']} == {'par_t1', 'par_t2'}
 
 

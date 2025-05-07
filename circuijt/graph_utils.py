@@ -8,9 +8,17 @@ class DSU:
     Disjoint Set Union (DSU) data structure, also known as Union-Find.
     Used here to manage equivalences between electrical net names.
     """
-    def __init__(self):
+    def __init__(self, preferred_roots=None):
         self.parent = {}
         self.num_sets = 0
+        if preferred_roots is None:
+            self.preferred_roots = {'GND', 'VDD'} # Default preferred roots
+        else:
+            self.preferred_roots = set(preferred_roots)
+        
+        # Define a hierarchy for preferred roots if they are unioned
+        # Lower index = higher preference (e.g., GND is most preferred)
+        self.preferred_root_order = ['GND', 'VDD'] # Extend as needed
 
     def add_set(self, item):
         """Ensures an item is part of the DSU, creating a new set if it's new."""
@@ -27,14 +35,48 @@ class DSU:
         return self.parent[item]
 
     def union(self, item1, item2):
-        """Merges the sets containing item1 and item2."""
+        """Merges the sets containing item1 and item2, preferring special net names as canonical."""
         root1 = self.find(item1)
         root2 = self.find(item2)
+
         if root1 != root2:
-            self.parent[root1] = root2  # Simple union: make root1 child of root2
+            is_root1_preferred = root1 in self.preferred_roots
+            is_root2_preferred = root2 in self.preferred_roots
+
+            if is_root1_preferred and not is_root2_preferred:
+                # root1 is preferred, root2 is not; root1 becomes the new representative
+                self.parent[root2] = root1
+            elif not is_root1_preferred and is_root2_preferred:
+                # root2 is preferred, root1 is not; root2 becomes the new representative
+                self.parent[root1] = root2
+            elif is_root1_preferred and is_root2_preferred:
+                # Both are preferred. Use the defined order to break ties.
+                try:
+                    idx1 = self.preferred_root_order.index(root1)
+                except ValueError: # root1 is preferred but not in order list
+                    idx1 = float('inf')
+                try:
+                    idx2 = self.preferred_root_order.index(root2)
+                except ValueError: # root2 is preferred but not in order list
+                    idx2 = float('inf')
+
+                if idx1 < idx2: # root1 has higher preference
+                    self.parent[root2] = root1
+                elif idx2 < idx1: # root2 has higher preference
+                    self.parent[root1] = root2
+                else: # Same preference or both not in ordered list (but are in self.preferred_roots)
+                      # Fallback to alphabetical or let root2 win for determinism
+                    if root1 < root2: # Arbitrary but deterministic tie-break
+                        self.parent[root2] = root1
+                    else:
+                        self.parent[root1] = root2
+            else:
+                # Neither is preferred; let root2's original root become the representative (original behavior)
+                self.parent[root1] = root2
+
             self.num_sets -= 1
-            return True  # Union occurred
-        return False # Already in the same set
+            return True
+        return False
 
     def get_all_canonical_representatives(self):
         """Returns a set of all canonical representatives."""
@@ -179,7 +221,12 @@ def ast_to_graph(parsed_statements):
                 elif item_type not in ['node', 'named_current', 'error']: # component, source, parallel_block
                     # This element needs a connection point after it, which will be implicit.
                     implicit_node_name_raw = f"_implicit_{implicit_node_idx}"
-                    next_attach_point_canonical = electrical_nets_dsu.find(implicit_node_name_raw) # adds to DSU
+                    # Ensure GND/VDD special nodes remain canonical when creating implicit nodes
+                    if current_attach_point_canonical in ['GND', 'VDD']:
+                        # Don't create new implicit node - use the special node directly
+                        next_attach_point_canonical = current_attach_point_canonical
+                    else:
+                        next_attach_point_canonical = electrical_nets_dsu.find(implicit_node_name_raw) # adds to DSU
                     is_next_point_implicit = True
 
                 if next_attach_point_canonical and not G.has_node(next_attach_point_canonical):
@@ -206,11 +253,16 @@ def ast_to_graph(parsed_statements):
                     # Store polarity as an attribute on the source component node
                     G.nodes[source_node_name]['polarity'] = polarity
 
-                    term_connected_to_current_attach = 'neg' if polarity == '(-+)' else 'pos'
-                    term_connected_to_next_attach = 'pos' if polarity == '(-+)' else 'neg'
-
-                    G.add_edge(source_node_name, current_attach_point_canonical, terminal=term_connected_to_current_attach)
-                    G.add_edge(source_node_name, next_attach_point_canonical, terminal=term_connected_to_next_attach)
+                    # For (-+) polarity:
+                    # - terminal 'neg' connects to current_attach_point (left side)
+                    # - terminal 'pos' connects to next_attach_point (right side)
+                    # For (+-) polarity, the opposite
+                    if polarity == '(-+)':
+                        G.add_edge(source_node_name, current_attach_point_canonical, terminal='neg')
+                        G.add_edge(source_node_name, next_attach_point_canonical, terminal='pos')
+                    else:
+                        G.add_edge(source_node_name, current_attach_point_canonical, terminal='pos')
+                        G.add_edge(source_node_name, next_attach_point_canonical, terminal='neg')
                     current_attach_point_canonical = next_attach_point_canonical
                     if is_next_point_implicit: implicit_node_idx += 1
 
