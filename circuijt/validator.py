@@ -212,11 +212,15 @@ class GraphValidator:
 
             # Get actual connections from the graph
             # get_component_connectivity returns: connections_map (term -> net), raw_connections (list of dicts)
-            _, raw_connections = get_component_connectivity(self.graph, comp_name)
-            actual_arity = len(raw_connections)
+            connections_map, raw_connections = get_component_connectivity(self.graph, comp_name)
+            actual_distinct_terminals_connected = len(connections_map)
 
-            if actual_arity > expected_arity:
-                self._add_error(f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) is connected to {actual_arity} nodes in the graph, exceeding its defined arity of {expected_arity}.", comp_name)
+            if actual_distinct_terminals_connected > expected_arity:
+                self._add_error(f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) has {actual_distinct_terminals_connected} distinct terminals connected, exceeding its defined arity of {expected_arity}.", comp_name)
+            elif self.graph.degree(comp_name) > 0 and actual_distinct_terminals_connected < expected_arity:
+                # Only raise if the component is actually connected to something but not fully
+                # An unconnected declared component is a different kind of issue (or not an issue)
+                self._add_error(f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) is not fully connected. Expected arity {expected_arity}, but only {actual_distinct_terminals_connected} distinct terminals are connected.", comp_name)
             
             # Future graph-specific checks can be added here:
             # - Check for components with fewer connections than expected (e.g., arity 2 component with only 1 connection)
