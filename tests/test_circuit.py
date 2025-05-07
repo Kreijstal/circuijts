@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """Tests for circuit parser/validator/graph utilities."""
 
-from circuit.parser import ProtoCircuitParser
-from circuit.validator import CircuitValidator # Updated import
-from circuit.ast_utils import summarize_circuit_elements, generate_proto_from_ast
-from circuit.graph_utils import ast_to_graph, graph_to_structured_ast
+import pytest
+from circuijt.parser import ProtoCircuitParser
+from circuijt.validator import CircuitValidator
+from circuijt.ast_utils import summarize_circuit_elements, generate_proto_from_ast
+from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
 
-test_circuit_description = """
+@pytest.fixture
+def test_circuit_description():
+    return """
 ; Test Circuit for Proto-Language Parser and Validator
 
 ; Declarations
@@ -38,61 +41,127 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 (AnotherNode) : (M1.S)
 """
 
-def test_parser():
-    print("\n--- Testing Parser ---")
+@pytest.fixture
+def invalid_circuit_description():
+    return """
+; Test Circuit for Proto-Language Parser and Validator with invalid R2 connections
+
+; Declarations
+V Vs1          ; Voltage Source
+R R1           ; Resistor 1
+Nmos M1        ; NMOS Transistor
+R R2           ; Resistor 2
+C C1           ; Capacitor C1
+L L_test       ; Inductor for variety
+
+; Component Connection Block for M1 (NOW SINGLE LINE)
+M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
+
+; Series Connections
+(node_input) -- Vs1 (-+) -- R1 -- (node_gate)
+(node_drain) -- C1 -- (GND)
+
+; Parallel Block example
+(node_drain) -- [ R2 || C1 ] -- (GND)
+
+; Controlled Source in Parallel Block
+(node_drain) -- [ gm1*vgs1 (->) || R2 ] -- (GND)
+
+; Named Current
+(VDD) -- ->I_supply -- R2 -- (node_drain)
+
+; Direct Assignment (Node Aliasing)
+(Vout) : (node_drain)
+(AnotherNode) : (M1.S)
+"""
+
+@pytest.fixture
+def valid_circuit_description():
+    return """
+; Test Circuit for Proto-Language Parser and Validator (Valid Circuit)
+
+; Declarations
+V Vs1          ; Voltage Source
+R R1           ; Resistor 1
+R R2           ; Resistor 2
+R R3           ; Additional resistor
+C C1           ; Capacitor
+Nmos M1        ; NMOS Transistor
+
+; Component Connection Block for M1
+M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
+
+; Input stage
+(VDD) -- Vs1 (-+) -- R1 -- (node_gate)
+
+; Output stage with proper component usage
+(node_drain) -- [ R2 || C1 ] -- (GND)
+(node_drain) -- R3 -- (VDD)
+
+; Node aliasing
+(Vout) : (node_drain)
+"""
+
+@pytest.fixture
+def parsed_statements(test_circuit_description):
+    parser = ProtoCircuitParser()
+    statements, errors = parser.parse_text(test_circuit_description)
+    assert not errors, f"Parser errors found: {errors}"
+    return statements
+
+@pytest.fixture
+def invalid_parsed_statements(invalid_circuit_description):
+    parser = ProtoCircuitParser()
+    statements, errors = parser.parse_text(invalid_circuit_description)
+    assert not errors, f"Parser errors found: {errors}"
+    return statements
+
+@pytest.fixture
+def valid_parsed_statements(valid_circuit_description):
+    parser = ProtoCircuitParser()
+    statements, errors = parser.parse_text(valid_circuit_description)
+    assert not errors, f"Parser errors found: {errors}"
+    return statements
+
+def test_parser(test_circuit_description):
     parser = ProtoCircuitParser()
     parsed_statements, parser_errors = parser.parse_text(test_circuit_description)
-    
-    if (parser_errors):
-        print("Parser Errors:")
-        for error in parser_errors:
-            print(error)
-    else:
-        print("Parser successful, no errors.")
-    
-    return parsed_statements
+    assert not parser_errors, f"Parser errors found: {parser_errors}"
+    assert len(parsed_statements) > 0, "No statements were parsed"
 
-def test_validator(parsed_statements):
-    print("\n--- Testing Validator ---")
-    validator = CircuitValidator(parsed_statements) # Use the new general validator
+def test_invalid_circuit_validator(invalid_parsed_statements):
+    print("\n--- Testing Invalid Circuit Validator ---")
+    validator = CircuitValidator(invalid_parsed_statements)
     validation_errors = validator.validate()
     
-    if validation_errors:
-        print("Validation Errors:")
-        for error in validation_errors:
-            print(error)
-    else:
-        print("Validation successful, no errors.")
+    # Expect validation error for R2 having too many connections
+    assert validation_errors, "Expected validation errors but found none"
+    assert any("R2" in error and "arity" in error.lower() for error in validation_errors), \
+        "Expected error about R2 having incorrect arity"
+    print("Validation failed as expected with R2 arity error")
+
+def test_valid_circuit_validator(valid_parsed_statements):
+    print("\n--- Testing Valid Circuit Validator ---")
+    validator = CircuitValidator(valid_parsed_statements)
+    validation_errors = validator.validate()
+    
+    # Valid circuit should have no validation errors
+    assert not validation_errors, f"Unexpected validation errors found: {validation_errors}"
+    print("Valid circuit passed validation as expected")
 
 def test_ast_utils(parsed_statements):
-    print("\n--- Testing AST Utilities ---")
     summary = summarize_circuit_elements(parsed_statements)
-    print("Circuit Summary:")
-    print(f"Total Nodes: {summary['num_total_nodes']}")
-    print(f"Components: {summary['num_total_components']}")
-    print(f"Explicit Nodes: {summary['details']['explicit_nodes']}")
-    print(f"Implicit Nodes: {summary['details']['implicit_nodes']}")
+    assert summary['num_total_nodes'] > 0, "No nodes found in circuit"
+    assert summary['num_total_components'] > 0, "No components found in circuit"
+    assert len(summary['details']['explicit_nodes']) > 0, "No explicit nodes found"
 
     reconstructed = generate_proto_from_ast(parsed_statements)
-    print("\nReconstructed Circuit:")
-    print(reconstructed)
+    assert reconstructed, "Failed to generate proto from AST"
 
 def test_graph_utils(parsed_statements):
-    print("\n--- Testing Graph Utilities ---")
     graph, dsu = ast_to_graph(parsed_statements)
-    print(f"Graph nodes: {len(graph.nodes())}")
-    print(f"Graph edges: {len(graph.edges())}")
+    assert len(graph.nodes()) > 0, "No nodes in generated graph"
+    assert len(graph.edges()) > 0, "No edges in generated graph"
     
     reconstructed_ast = graph_to_structured_ast(graph, dsu)
-    print("\nReconstructed AST from graph:")
-    print(f"Statements: {len(reconstructed_ast)}")
-    
-    reconstructed_code = generate_proto_from_ast(reconstructed_ast)
-    print("\nReconstructed Code from graph:")
-    print(reconstructed_code)
-
-if __name__ == "__main__":
-    parsed = test_parser()
-    test_validator(parsed)
-    test_ast_utils(parsed)
-    test_graph_utils(parsed)
+    assert len(reconstructed_ast) > 0, "Failed to reconstruct AST from graph"

@@ -274,29 +274,33 @@ def get_preferred_net_name_for_reconstruction(canonical_net_name, dsu,
     members = dsu.get_set_members(canonical_net_name)
     if not members: return canonical_net_name
 
-    # Priority order for selecting a display name for a net
-    # 1. User-defined, non-device terminal, non-significant common rail names
-    user_named = sorted([m for m in members if not m.startswith("_implicit_") and '.' not in m and m not in known_significant_nodes])
+    # Priority:
+    # 1. User-defined, non-device terminal, non-significant common rail names (prefer shorter, then alpha)
+    user_named = sorted([m for m in members if not m.startswith("_implicit_") and '.' not in m and m not in known_significant_nodes], key=lambda x: (len(x), x))
     if user_named: return user_named[0]
 
-    # 2. Known significant common rails
-    sigs = sorted([m for m in members if m in known_significant_nodes])
+    # 2. Known significant common rails (prefer shorter, then alpha)
+    sigs = sorted([m for m in members if m in known_significant_nodes], key=lambda x: (len(x), x))
     if sigs: return sigs[0]
 
-    # 3. User-defined device terminals (e.g., M1.G)
-    dev_terms = sorted([m for m in members if '.' in m and not m.startswith("_implicit_")])
+    # 3. User-defined device terminals (e.g., M1.G) (prefer shorter, then alpha)
+    dev_terms = sorted([m for m in members if '.' in m and not m.startswith("_implicit_")], key=lambda x: (len(x), x))
     if dev_terms: return dev_terms[0]
-
-    # 4. Any other non-implicit name (should be covered by user_named if exists)
-    non_implicit = sorted([m for m in members if not m.startswith("_implicit_")])
+    
+    # 4. Any other non-implicit name
+    non_implicit = sorted([m for m in members if not m.startswith("_implicit_")], key=lambda x: (len(x),x))
     if non_implicit: return non_implicit[0]
 
-    # 5. Implicit name, only if allowed or no other option
-    if allow_implicit_if_only_option:
-        return canonical_net_name # Which would be an implicit name if all others failed
 
-    # Fallback: if we must return something and implicit is not allowed, this indicates an issue or an purely internal net.
-    # For reconstruction, we might prefer to show its canonical form if it's an endpoint of a path.
+    # 5. Implicit name, only if allowed or no other option
+    # The canonical_net_name itself might be an implicit one. Use its preferred form.
+    # If allow_implicit_if_only_option is True, or if it's the only option.
+    # The DSU find operation already gives a canonical representative.
+    # If all other attempts fail, this means the canonical_net_name is likely an _implicit_ node.
+    if allow_implicit_if_only_option or canonical_net_name.startswith("_implicit_"):
+        return canonical_net_name
+
+    # Fallback, should ideally be covered by one of the above.
     return canonical_net_name
 
 
@@ -313,87 +317,222 @@ def get_component_connectivity(graph, comp_name):
     return connections, raw_connections
 
 
-def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True):
+def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True): # remove_implicit_nodes not used yet
     ast_statements = []
-    processed_components = set()  # Components included in any AST statement
-    visited_nets = set()  # Track visited nets to prevent infinite loops
-
+    # Tracks components whose connections are fully described by an AST statement (decl, block, or series)
+    processed_components = set()
+    
     component_instance_nodes = [n for n, data in graph.nodes(data=True) if data.get('node_kind') == 'component_instance']
     comp_data_map = {name: graph.nodes[name] for name in component_instance_nodes}
 
-    # 1. Emit Declarations
-    for comp_name in component_instance_nodes:
-        if not comp_name.startswith("_internal_"):  # Internal VCCS/Noise are not declared
-            ast_statements.append({
-                'type': 'declaration',
-                'component_type': comp_data_map[comp_name]['instance_type'],
-                'instance_name': comp_name,
-                'line': 0  # Placeholder for reconstructed AST
-            })
+    # 1. Emit Declarations for all non-internal components
+    # Sort by instance name for deterministic output
+    sorted_component_instance_nodes = sorted([
+        name for name in component_instance_nodes if not name.startswith("_internal_")
+    ])
+    for comp_name in sorted_component_instance_nodes:
+        ast_statements.append({
+            'type': 'declaration',
+            'component_type': comp_data_map[comp_name]['instance_type'],
+            'instance_name': comp_name,
+            'line': 0  # Placeholder
+        })
+    # Note: Declaration doesn't mean it's "processed" in terms of connections yet.
 
-    # 2. Handle "Complex" Components (Multi-terminal like Nmos, or those with specific terminals)
-    for comp_name in component_instance_nodes:
-        if comp_name in processed_components or comp_name.startswith("_internal_"):
+    # 2. Reconstruct Direct Assignments from DSU
+    # Iterate over canonical representatives to process each set once
+    processed_dsu_roots_for_assignment = set()
+    # Sort DSU items for deterministic output of assignments
+    sorted_dsu_keys = sorted(list(dsu.parent.keys()))
+
+    for item_in_dsu in sorted_dsu_keys:
+        canonical_root = dsu.find(item_in_dsu)
+        if canonical_root in processed_dsu_roots_for_assignment:
+            continue
+        
+        members = sorted(list(dsu.get_set_members(canonical_root)))
+        # Special handling for significant nodes like GND
+        significant_nodes = {'GND', 'VDD'}
+        target_node = None
+        
+        # First check for significant nodes in this set
+        for sig_node in significant_nodes:
+            if sig_node in members:
+                target_node = sig_node
+                break
+                
+        # If no significant node, use the canonical root's preferred name
+        if not target_node:
+            target_node = get_preferred_net_name_for_reconstruction(
+                canonical_root, dsu,
+                known_significant_nodes=significant_nodes,
+                allow_implicit_if_only_option=True
+            )
+
+        for member_name in members:
+            # Only emit if:
+            # 1. Member is different from target
+            # 2. Member is not implicit
+            # 3. Member is not a device terminal
+            if (member_name != target_node and
+                not member_name.startswith('_implicit_') and
+                '.' not in member_name):
+                
+                ast_statements.append({
+                    'type': 'direct_assignment',
+                    'source_node': member_name,
+                    'target_node': target_node,
+                    'line': 0
+                })
+                
+        processed_dsu_roots_for_assignment.add(canonical_root)
+
+
+    # 3. Handle "Complex" Components (Multi-terminal like Nmos, Opamp) via Component Connection Blocks
+    # These are components best described by their explicit terminal connections.
+    # Sort for deterministic output
+    for comp_name in sorted_component_instance_nodes: # Iterate over non-internal components
+        if comp_name in processed_components: # Already handled
             continue
 
         instance_type = comp_data_map[comp_name]['instance_type']
-        is_complex_type = instance_type in ["Nmos", "Pmos", "Opamp"]  # Add others
+        # Define types that typically use component connection blocks
+        is_complex_type_for_block = instance_type in ["Nmos", "Pmos", "Opamp"]
+        
+        connections_map, raw_conns = get_component_connectivity(graph, comp_name)
 
-        _, raw_conns = get_component_connectivity(graph, comp_name)
-
-        if is_complex_type or len(raw_conns) > 2:
+        # Use block if it's a defined complex type and has connections,
+        # OR if it's not a simple 2-terminal device (arity > 2 implies block is better)
+        # This check might need refinement based on component arities from a DB
+        from .components import ComponentDatabase # Local import if not already available
+        cdb = ComponentDatabase()
+        arity = cdb.get_arity(instance_type)
+        
+        if (is_complex_type_for_block and raw_conns) or (arity is not None and arity > 2 and raw_conns):
             connections_ast = []
+            # Sort connections by terminal name for deterministic output
             for conn_info in sorted(raw_conns, key=lambda x: x['term']):
                 connections_ast.append({
                     'terminal': conn_info['term'],
                     'node': get_preferred_net_name_for_reconstruction(conn_info['net_canon'], dsu, allow_implicit_if_only_option=True)
                 })
-            if connections_ast:
+            
+            if connections_ast: # Only add if there are actual connections
                 ast_statements.append({
                     'type': 'component_connection_block',
                     'component_name': comp_name,
                     'connections': connections_ast,
-                    'line': 0  # Placeholder for reconstructed AST
+                    'line': 0
                 })
-                processed_components.add(comp_name)
+                processed_components.add(comp_name) # Mark as fully handled
 
-    # 3. Iteratively find and emit series paths (incorporating parallel blocks)
-    all_nets_canonical = [n for n, data in graph.nodes(data=True) if data.get('node_kind') == 'electrical_net']
+    # 4. Reconstruct Series Connections and Parallel Blocks
+    # This handles components not covered by Component Connection Blocks (typically 2-terminal ones)
+    
+    # Key: frozenset({net1_canon, net2_canon}), Value: list of element_asts for parallel group
+    parallel_groups_map = {}
+    
+    # Consider all components, including internal ones, for path reconstruction
+    # Sort for deterministic processing order
+    all_components_for_paths = sorted(list(component_instance_nodes))
 
-    potential_path_starts_canon = sorted(
-        [n_canon for n_canon in all_nets_canonical
-         if not get_preferred_net_name_for_reconstruction(n_canon, dsu).startswith('_implicit_')],
-        key=lambda x: get_preferred_net_name_for_reconstruction(x, dsu)
-    )
+    for comp_name in all_components_for_paths:
+        if comp_name in processed_components: # Skip if already handled by a component_connection_block
+            continue
+        
+        comp_node_data = graph.nodes[comp_name]
+        # Get canonical nets this component is connected to
+        connected_nets_canon = set()
+        for _, neighbor_net_canonical, edge_data in graph.edges(comp_name, data=True):
+            if graph.nodes[neighbor_net_canonical].get('node_kind') == 'electrical_net':
+                connected_nets_canon.add(neighbor_net_canonical)
+        
+        # We are looking for elements that span between exactly two nets
+        if len(connected_nets_canon) == 2:
+            nets_pair_fs = frozenset(connected_nets_canon)
+            if nets_pair_fs not in parallel_groups_map:
+                parallel_groups_map[nets_pair_fs] = []
+            
+            element_ast = None
+            instance_type = comp_node_data.get('instance_type')
+            if instance_type == 'controlled_source':
+                element_ast = {
+                    'type': 'controlled_source',
+                    'expression': comp_node_data['expression'],
+                    'direction': comp_node_data['direction']
+                }
+            elif instance_type == 'noise_source':
+                 element_ast = {
+                    'type': 'noise_source',
+                    'id': comp_node_data['id'],
+                    'direction': comp_node_data['direction']
+                }
+            elif not comp_name.startswith("_internal_"): # Regular declared component
+                element_ast = {'type': 'component', 'name': comp_name}
+            
+            if element_ast:
+                parallel_groups_map[nets_pair_fs].append(element_ast)
 
-    for start_net_canon in potential_path_starts_canon:
-        if start_net_canon in visited_nets:
+    # Emit series_connection AST statements from the identified parallel_groups_map
+    # Sort net pairs for deterministic output of series statements
+    # Sorting frozensets of strings: convert to sorted tuple first
+    sorted_net_pairs = sorted(list(parallel_groups_map.keys()), key=lambda fs: tuple(sorted(list(fs))))
+
+    for nets_pair_fs in sorted_net_pairs:
+        elements_ast_list = parallel_groups_map[nets_pair_fs]
+        if not elements_ast_list:
             continue
 
-        stack = [(start_net_canon, [])]  # (current_net, current_path)
+        # Ensure components in this path haven't been "fully" processed by a component block
+        # This check is somewhat redundant if `comp_name in processed_components` was effective above,
+        # but good for safety if an internal component was part of a block (which shouldn't happen).
+        contains_already_processed_declared_comp = False
+        for el_ast in elements_ast_list:
+            if el_ast['type'] == 'component' and el_ast['name'] in processed_components:
+                contains_already_processed_declared_comp = True
+                break
+        if contains_already_processed_declared_comp:
+            continue
 
-        while stack:
-            current_net, current_path = stack.pop()
 
-            if current_net in visited_nets:
-                continue
+        # Determine path endpoints (node ASTs)
+        # Ensure consistent ordering of n1, n2 for path string generation, e.g., alphabetically
+        n1_canon, n2_canon = tuple(sorted(list(nets_pair_fs)))
+        node1_ast = {'type': 'node', 'name': get_preferred_net_name_for_reconstruction(n1_canon, dsu, allow_implicit_if_only_option=True)}
+        node2_ast = {'type': 'node', 'name': get_preferred_net_name_for_reconstruction(n2_canon, dsu, allow_implicit_if_only_option=True)}
 
-            visited_nets.add(current_net)
+        path_core_elements_ast = []
+        if len(elements_ast_list) > 1:
+            # Sort elements within the parallel block for deterministic output
+            def sort_key_parallel_elements(el):
+                if el['type'] == 'component': return (0, el['name'])
+                if el['type'] == 'controlled_source': return (1, el['expression'])
+                if el['type'] == 'noise_source': return (2, el['id'])
+                return (3, "") # fallback
+            
+            sorted_elements = sorted(elements_ast_list, key=sort_key_parallel_elements)
+            path_core_elements_ast.append({'type': 'parallel_block', 'elements': sorted_elements})
+        elif len(elements_ast_list) == 1: # Single element path
+            path_core_elements_ast.append(elements_ast_list[0])
+        
+        if not path_core_elements_ast: # Should not happen if elements_ast_list was not empty
+            continue
 
-            for comp_neighbor_name in graph.neighbors(current_net):
-                if comp_neighbor_name in processed_components or \
-                   graph.nodes[comp_neighbor_name].get('node_kind') != 'component_instance' or \
-                   comp_neighbor_name.startswith("_internal_"):
-                    continue
+        full_path_ast = [node1_ast] + path_core_elements_ast + [node2_ast]
+        
+        # Create a representative string for debugging/sorting (not part of formal AST)
+        path_str_repr = f"({node1_ast['name']}) -- ... -- ({node2_ast['name']})"
 
-                comp_conns_map, _ = get_component_connectivity(graph, comp_neighbor_name)
-
-                if current_net in comp_conns_map.values():
-                    next_net = [net for term, net in comp_conns_map.items() if net != current_net]
-                    if next_net:
-                        next_net = next_net[0]
-                        stack.append((next_net, current_path + [{'type': 'component', 'name': comp_neighbor_name}]))
-
-                processed_components.add(comp_neighbor_name)
+        ast_statements.append({
+            'type': 'series_connection',
+            'path': full_path_ast,
+            '_path_str': path_str_repr,
+            'line': 0
+        })
+        
+        # Mark declared components within this path as handled to avoid re-processing by other means
+        for el_ast in elements_ast_list:
+            if el_ast['type'] == 'component':
+                processed_components.add(el_ast['name'])
 
     return ast_statements

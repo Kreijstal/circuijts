@@ -169,23 +169,47 @@ def transform_and_validate_loop(initial_code: str):
     return ast_1, graph_1, ast_2, code_final
 
 test_circuit_description = """
-; Declarations for Transistor Small Signal Model (b)
-R rDS1   ; Resistor r_DS1
+; Component Declarations
+V Vin_src     ; Input Voltage Source
+R R1          ; Resistor 1
+Nmos M1       ; NMOS Transistor M1
+R R2          ; Resistor 2
+C Cgd         ; Gate-Drain Capacitance of M1
+C Cgb         ; Gate-Bulk Capacitance of M1 (the small one in the diagram)
+C Cgs         ; Gate-Source Capacitance of M1
+C Cdb         ; Drain-Bulk Capacitance of M1
+C Csb         ; Source-Bulk Capacitance of M1
+C CL          ; Load Capacitance
 
-; Connections for Transistor Small Signal Model (b)
-; External terminals/nodes of the model are (G), (S), (D), (B)
+; Connections for the main transistor M1
+; We'll use node names (node_gate), (Vout) and rely on M1's block definition
+; to connect its terminals to these and other primary nodes like (VDD) and (GND).
+M1 { G:(node_gate), D:(VDD), S:(Vout), B:(GND) }
 
-; Body terminal B is connected to Ground
-(B):(GND)
+; Input Path
+(GND) -- Vin_src (-+) -- (node_vin_pos) -- R1 -- (node_gate)
 
-; Main path between Drain (D) and Source (S)
-; It consists of two controlled current sources and resistor rDS1 in parallel.
-; Current sources flow from D to S.
-(D) -- [ gm1*VGS (->) || gmB1*VBS (->) || rDS1 ] -- (S)
+; Parasitic Capacitances connected to the Gate of M1
+(node_gate) -- Cgd -- (VDD)  ; Cgd between Gate (node_gate/M1.G) and Drain (VDD/M1.D)
+(node_gate) -- Cgb -- (GND)  ; Cgb between Gate (node_gate/M1.G) and Bulk (GND/M1.B)
+(node_gate) -- Cgs -- (Vout) ; Cgs between Gate (node_gate/M1.G) and Source (Vout/M1.S)
 
-; Control voltage definitions (implicit in the context of a MOSFET small-signal model)
-; VGS refers to the voltage difference V(G) - V(S)
-; VBS refers to the voltage difference V(B) - V(S)
+; Parasitic Capacitance connected to the Drain of M1 (besides Cgd)
+(VDD) -- Cdb -- (GND)        ; Cdb between Drain (VDD/M1.D) and Bulk (GND/M1.B)
+
+; Parasitic Capacitance connected to the Source of M1 (besides Cgs)
+(Vout) -- Csb -- (GND)       ; Csb between Source (Vout/M1.S) and Bulk (GND/M1.B)
+
+; Output Path Components
+; R2 and CL are effectively in parallel from Vout to GND.
+(Vout) -- [ R2 || CL ] -- (GND)
+
+; Node Aliases/Definitions (Implicit from M1 block and Vout usage)
+; (M1.G) : (node_gate)
+; (M1.D) : (VDD)
+; (M1.S) : (Vout)
+; (M1.B) : (GND)
+; (Vout_pin) : (Vout) ; Assuming Vout label in schematic is this node
 """
 transform_and_validate_loop(test_circuit_description)
 
