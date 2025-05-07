@@ -18,16 +18,21 @@ def ast_to_flattened_ast(regular_ast_statements, dsu):
         list: A list of "flattened" AST statements.
     """
     flattened_statements = []
-    declared_components_info = {} # Store type for arity checks if needed, and to process only declared
 
-    # Pass 1: Collect declarations and build a component info map
+    # Pass 1: Extract declarations and start building component info
+    declared_components_info = {}
     for stmt in regular_ast_statements:
         if stmt['type'] == 'declaration':
-            flattened_statements.append(stmt.copy()) # Keep declarations as is
             declared_components_info[stmt['instance_name']] = {
                 'type': stmt['component_type'],
                 'line': stmt.get('line', 0)
             }
+            flattened_statements.append({
+                'type': 'declaration',
+                'component_type': stmt['component_type'],
+                'instance_name': stmt['instance_name'],
+                'line': stmt.get('line', 0)
+            })
 
     # Pass 2: Generate graph to easily get all explicit connections
     # This leverages the existing robust logic in ast_to_graph.
@@ -37,6 +42,35 @@ def ast_to_flattened_ast(regular_ast_statements, dsu):
 
     component_pins_connected = set() # To avoid duplicate pin_connection entries if multiple AST stmts refer to same connection
 
+    # First handle any internal components from voltage sources or controlled sources
+    for node_name, node_data in graph.nodes(data=True):
+        if node_data.get('node_kind') == 'component_instance' and node_name.startswith('_internal_'):
+            # Add declaration for internal component
+            flattened_statements.append({
+                'type': 'declaration',
+                'component_type': node_data.get('instance_type', 'UNKNOWN'),
+                'instance_name': node_name,
+                'internal': True,
+                'line': 0
+            })
+            
+            # Add its connections
+            for _, neighbor_name, edge_data in graph.edges(node_name, data=True):
+                if graph.nodes[neighbor_name].get('node_kind') == 'electrical_net':
+                    terminal_name = edge_data.get('terminal')
+                    canonical_net_name = neighbor_name
+                    
+                    if terminal_name:
+                        pin_conn = {
+                            'type': 'pin_connection',
+                            'component_instance': node_name,
+                            'terminal': terminal_name,
+                            'net': canonical_net_name,
+                            'line': 0
+                        }
+                        flattened_statements.append(pin_conn)
+
+    # Then handle regular components
     for node_name, node_data in graph.nodes(data=True):
         if node_data.get('node_kind') == 'component_instance':
             comp_instance_name = node_name
@@ -71,38 +105,24 @@ def ast_to_flattened_ast(regular_ast_statements, dsu):
                                 'component_instance': comp_instance_name,
                                 'terminal': terminal_name,
                                 'net': canonical_net_name,
-                                'line': declared_components_info.get(comp_instance_name, {}).get('line', 0)
+                                'line': 0
                             }
-                            # Add parallel_group flag if the component is in a parallel block
-                            if node_data.get('in_parallel'):
-                                pin_conn['parallel_group'] = True
-                                pin_conn['parallel_nets'] = node_data.get('parallel_nets', [])
                             flattened_statements.append(pin_conn)
                             component_pins_connected.add(pin_key)
 
-    # Pass 3: Add net aliases from the DSU structure
-    # This makes the flattened AST more self-contained regarding net equivalences
-    processed_dsu_roots = set()
-    # Sort DSU items for deterministic output
-    sorted_dsu_keys = sorted(list(dsu.parent.keys()))
+    # Add net aliases for equivalent nets
+    added_aliases = set()
+    for net_name in dsu.parent:
+        canonical_net = dsu.find(net_name)
+        if net_name != canonical_net and (net_name, canonical_net) not in added_aliases:
+            flattened_statements.append({
+                'type': 'net_alias',
+                'source_net': net_name,
+                'canonical_net': canonical_net,
+                'line': 0
+            })
+            added_aliases.add((net_name, canonical_net))
 
-    for item in sorted_dsu_keys:
-        canonical_rep = dsu.find(item)
-        if canonical_rep in processed_dsu_roots:
-            continue
-        
-        members = sorted(list(dsu.get_set_members(canonical_rep)))
-        for member_name in members:
-            if member_name != canonical_rep and not member_name.startswith("_implicit_"): 
-                # Add alias if member is not itself the canonical root and not an implicit node
-                flattened_statements.append({
-                    'type': 'net_alias',
-                    'source_net': member_name, # The user-visible name
-                    'canonical_net': canonical_rep,
-                    'line': 0 # Aliases don't directly map to a single line from original AST
-                })
-        processed_dsu_roots.add(canonical_rep)
-        
     return flattened_statements
 
 def flattened_ast_to_regular_ast(flattened_ast_statements):

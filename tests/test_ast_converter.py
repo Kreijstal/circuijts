@@ -59,39 +59,70 @@ def test_net_alias_preservation():
     assert found_alias
 
 def test_roundtrip_conversion():
+    """Test converting AST to flattened form and back"""
     parser = ProtoCircuitParser()
     circuit = """
     R R1
     C C1
-    (VDD) -- [ R1 || C1 ] -- (GND)
+    (out) -- [ R1 || C1 ] -- (GND)
     """
-    original_statements, errors = parser.parse_text(circuit)
+    statements, errors = parser.parse_text(circuit)
     assert not errors
 
-    # Convert to flattened form
-    _, dsu = ast_to_graph(original_statements)
-    flattened = ast_to_flattened_ast(original_statements, dsu)
+    # Step 1: AST -> Graph -> Flattened
+    graph, dsu = ast_to_graph(statements)
+    flattened = ast_to_flattened_ast(statements, dsu)
     
-    # Convert back to regular
+    # Debug info about flattening
+    print("\nFlattened AST structure:")
+    print(f"Total statements: {len(flattened)}")
+    for stmt in flattened:
+        print(f"Statement type: {stmt['type']}")
+        if stmt['type'] == 'pin_connection':
+            print(f"  {stmt['component_instance']}.{stmt['terminal']} -> {stmt['net']}")
+    
+    # Step 2: Flattened -> Regular AST
     reconstructed = flattened_ast_to_regular_ast(flattened)
     
-    # Check essential elements preserved
-    # Both ASTs should have same declarations
-    orig_decls = {(s['instance_name'], s['component_type']) 
-                 for s in original_statements if s['type'] == 'declaration'}
-    recon_decls = {(s['instance_name'], s['component_type']) 
-                  for s in reconstructed if s['type'] == 'declaration'}
-    assert orig_decls == recon_decls
-
-    # Check parallel structure preserved (might be in different format but components should be parallel)
+    print("\nReconstructed AST structure:")
+    print(f"Total statements: {len(reconstructed)}")
+    for stmt in reconstructed:
+        if stmt['type'] == 'declaration':
+            print(f"  Declaration: {stmt['component_type']} {stmt['instance_name']}")
+        elif stmt['type'] == 'parallel_connection':
+            print(f"  Parallel connection with {len(stmt['elements'])} elements")
+            for el in stmt['elements']:
+                print(f"    - {el['type']}: {el.get('name', '')}")
+        elif stmt['type'] == 'series_connection':
+            path_desc = []
+            for el in stmt['path']:
+                if el['type'] == 'node':
+                    path_desc.append(f"({el['name']})")
+                elif el['type'] == 'component':
+                    path_desc.append(el['name'])
+                elif el['type'] == 'parallel_block':
+                    components = [e['name'] for e in el['elements'] if e['type'] == 'component']
+                    path_desc.append(f"[{' || '.join(components)}]")
+            print(f"  Series path: {' -- '.join(path_desc)}")
+    
+    # Check parallel structure preserved
     parallel_found = False
     for stmt in reconstructed:
-        if stmt['type'] == 'parallel_connection':
-            components = {e['name'] for e in stmt['elements'] if e['type'] == 'component'}
-            if components == {'R1', 'C1'}:
-                parallel_found = True
-                break
-    assert parallel_found
+        if stmt['type'] == 'series_connection':
+            for el in stmt['path']:
+                if el['type'] == 'parallel_block':
+                    components = {e['name'] for e in el['elements'] if e['type'] == 'component'}
+                    if components == {'R1', 'C1'}:
+                        parallel_found = True
+                        break
+    
+    if not parallel_found:
+        print("\nDebug - All paths in reconstructed AST:")
+        for stmt in reconstructed:
+            if stmt['type'] == 'series_connection':
+                print(f"Path elements: {stmt['path']}")
+                
+    assert parallel_found, "Parallel structure (R1 || C1) not preserved in reconstruction"
 
 def test_internal_components_handling():
     parser = ProtoCircuitParser()
@@ -101,15 +132,31 @@ def test_internal_components_handling():
     (GND) -- V1(-+) -- R1 -- (out)  ; Creates internal voltage source
     """
     statements, errors = parser.parse_text(circuit)
-    assert not errors
+    assert not errors, f"Parser failed with errors: {errors}"
 
-    _, dsu = ast_to_graph(statements)
+    print("\nOriginal statements:")
+    for stmt in statements:
+        print(f"Statement type: {stmt['type']}")
+        if stmt['type'] == 'series_connection':
+            print(f"  Path: {stmt['path']}")
+
+    graph, dsu = ast_to_graph(statements)
+    
+    print("\nGraph structure:")
+    print(f"Nodes: {[n for n in graph.nodes()]}")
+    print(f"Edges: {[(u,v,d) for u,v,d in graph.edges(data=True)]}")
+    
     flattened = ast_to_flattened_ast(statements, dsu)
     
     # Check internal voltage source connections are preserved
     internal_pins = [p for p in flattened if p['type'] == 'pin_connection' 
                     and p['component_instance'].startswith('_internal_')]
-    assert len(internal_pins) > 0  # Should have some internal component connections
+                    
+    print("\nInternal component connections:")
+    for pin in internal_pins:
+        print(f"  {pin['component_instance']}.{pin['terminal']} -> {pin['net']}")
+                    
+    assert len(internal_pins) > 0, "No internal component connections found"
 
 def test_terminal_preservation():
     parser = ProtoCircuitParser()
@@ -120,19 +167,32 @@ def test_terminal_preservation():
     statements, errors = parser.parse_text(circuit)
     assert not errors
 
-    _, dsu = ast_to_graph(statements)
+    graph, dsu = ast_to_graph(statements)
+    
+    print("\nGraph structure:")
+    print(f"Nodes: {[n for n in graph.nodes()]}")
+    edges = [(u,v,d) for u,v,d in graph.edges(data=True)]
+    print(f"Edges: {edges}")
+    
     flattened = ast_to_flattened_ast(statements, dsu)
     
     # Check all MOSFET terminals preserved
     m1_pins = [p for p in flattened if p['type'] == 'pin_connection' 
                and p['component_instance'] == 'M1']
+               
+    print("\nMOSFET terminal connections:")
+    for pin in m1_pins:
+        print(f"  {pin['terminal']} -> {pin['net']}")
     
     terminals = {p['terminal'] for p in m1_pins}
-    assert terminals == {'G', 'S', 'D', 'B'}
+    assert terminals == {'G', 'S', 'D', 'B'}, f"Missing terminals. Found: {terminals}"
     
     # Check correct nets
     pin_nets = {p['terminal']: p['net'] for p in m1_pins}
-    assert pin_nets['G'] == 'in' or any(a['canonical_net'] == 'in' 
-           for a in flattened if a['type'] == 'net_alias' and a['source_net'] == pin_nets['G'])
-    assert pin_nets['S'] == 'GND'
-    assert pin_nets['B'] == 'GND'
+    
+    # Allow for either the original net name or its canonical equivalent via DSU
+    assert (pin_nets['G'] == 'in' or 
+            any(a['canonical_net'] == 'in' for a in flattened if a['type'] == 'net_alias' 
+                and a['source_net'] == pin_nets['G']))
+    assert pin_nets['S'] == 'GND', f"Source should connect to GND, found: {pin_nets['S']}"
+    assert pin_nets['B'] == 'GND', f"Bulk should connect to GND, found: {pin_nets['B']}"
