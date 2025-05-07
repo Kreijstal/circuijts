@@ -188,9 +188,12 @@ def ast_to_graph(parsed_statements):
 
                 elif item_type == 'source':
                     source_name = item['name']
-                    if source_name not in declared_components: continue
-                    source_node_name = declared_components[source_name]['instance_node_name']
                     polarity = item['polarity']
+                    if source_name not in declared_components: continue # Error already handled by validator ideally
+                    source_node_name = declared_components[source_name]['instance_node_name']
+
+                    # Store polarity as an attribute on the source component node
+                    G.nodes[source_node_name]['polarity'] = polarity
 
                     term_connected_to_current_attach = 'neg' if polarity == '(-+)' else 'pos'
                     term_connected_to_next_attach = 'pos' if polarity == '(-+)' else 'neg'
@@ -441,11 +444,15 @@ def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True): # remove_im
             continue
         
         comp_node_data = graph.nodes[comp_name]
+        instance_type = comp_node_data.get('instance_type')
+        
         # Get canonical nets this component is connected to
         connected_nets_canon = set()
+        terminal_to_net_map = {}  # Track which terminal connects to which net
         for _, neighbor_net_canonical, edge_data in graph.edges(comp_name, data=True):
             if graph.nodes[neighbor_net_canonical].get('node_kind') == 'electrical_net':
                 connected_nets_canon.add(neighbor_net_canonical)
+                terminal_to_net_map[edge_data.get('terminal')] = neighbor_net_canonical
         
         # We are looking for elements that span between exactly two nets
         if len(connected_nets_canon) == 2:
@@ -454,7 +461,6 @@ def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True): # remove_im
                 parallel_groups_map[nets_pair_fs] = []
             
             element_ast = None
-            instance_type = comp_node_data.get('instance_type')
             if instance_type == 'controlled_source':
                 element_ast = {
                     'type': 'controlled_source',
@@ -462,12 +468,25 @@ def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True): # remove_im
                     'direction': comp_node_data['direction']
                 }
             elif instance_type == 'noise_source':
-                 element_ast = {
+                element_ast = {
                     'type': 'noise_source',
                     'id': comp_node_data['id'],
                     'direction': comp_node_data['direction']
                 }
-            elif not comp_name.startswith("_internal_"): # Regular declared component
+            elif instance_type == 'V':  # Voltage source
+                # Get terminals in correct order based on the stored polarity
+                polarity = comp_node_data.get('polarity', '(-+)')  # Default to (-+) if not stored
+                neg_net = terminal_to_net_map.get('neg')
+                pos_net = terminal_to_net_map.get('pos')
+                
+                if neg_net and pos_net:  # Only if we found both terminals
+                    # Create source element with stored polarity
+                    element_ast = {
+                        'type': 'source',
+                        'name': comp_name,
+                        'polarity': polarity
+                    }
+            elif not comp_name.startswith("_internal_"):  # Regular declared component
                 element_ast = {'type': 'component', 'name': comp_name}
             
             if element_ast:
