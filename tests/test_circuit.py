@@ -132,21 +132,60 @@ def test_parser(test_circuit_description):
 def test_invalid_circuit_validator(invalid_parsed_statements):
     print("\n--- Testing Invalid Circuit Validator ---")
     validator = CircuitValidator(invalid_parsed_statements)
-    validation_errors = validator.validate()
+    validation_errors, debug_info = validator.validate()
     
     # Expect validation error for R2 having too many connections
     assert validation_errors, "Expected validation errors but found none"
-    assert any("R2" in error and "arity" in error.lower() for error in validation_errors), \
-        "Expected error about R2 having incorrect arity"
+    
+    # Print debug info on failure
+    if not any("R2" in error and "arity" in error.lower() for error in validation_errors):
+        print("\nDebug Information:")
+        if 'ast_validation' in debug_info:
+            print("\nAST Validation Details:")
+            for info in debug_info['ast_validation']:
+                print(f"Total statements: {info['total_statements']}")
+                print(f"Declarations: {[d['instance_name'] for d in info['declarations']]}")
+                print(f"Component types: {info['components']}")
+                
+        if 'graph_construction' in debug_info:
+            print("\nGraph Construction Details:")
+            for info in debug_info['graph_construction']:
+                print(f"Total nodes: {info['nodes']}")
+                print(f"Total edges: {info['edges']}")
+                print(f"Net nodes: {info['nets']}")
+                print(f"Component nodes: {info['components']}")
+                
+        raise AssertionError("Expected error about R2 having incorrect arity. Debug info above.")
     print("Validation failed as expected with R2 arity error")
 
 def test_valid_circuit_validator(valid_parsed_statements):
     print("\n--- Testing Valid Circuit Validator ---")
     validator = CircuitValidator(valid_parsed_statements)
-    validation_errors = validator.validate()
+    validation_errors, debug_info = validator.validate()
     
-    # Valid circuit should have no validation errors
-    assert not validation_errors, f"Unexpected validation errors found: {validation_errors}"
+    # On failure, print debug info
+    if validation_errors:
+        print("\nUnexpected Validation Errors:")
+        for error in validation_errors:
+            print(f"  {error}")
+            
+        print("\nDebug Information:")
+        if 'ast_validation' in debug_info:
+            print("\nAST Validation Details:")
+            for info in debug_info['ast_validation']:
+                print(f"Total statements: {info['total_statements']}")
+                print(f"Declarations: {[d['instance_name'] for d in info['declarations']]}")
+                print(f"Component types: {info['components']}")
+                
+        if 'graph_construction' in debug_info:
+            print("\nGraph Construction Details:")
+            for info in debug_info['graph_construction']:
+                print(f"Total nodes: {info['nodes']}")
+                print(f"Total edges: {info['edges']}")
+                print(f"Net nodes: {info['nets']}")
+                print(f"Component nodes: {info['components']}")
+                
+        raise AssertionError("Unexpected validation errors found. Debug info above.")
     print("Valid circuit passed validation as expected")
 
 def test_ast_utils(parsed_statements):

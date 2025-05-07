@@ -1,0 +1,41 @@
+; Component Declarations
+V Vin_src     ; Input Voltage Source
+R R1          ; Resistor 1
+Nmos M1       ; NMOS Transistor M1
+R R2          ; Resistor 2
+C Cgd         ; Gate-Drain Capacitance of M1
+C Cgb         ; Gate-Bulk Capacitance of M1 (the small one in the diagram)
+C Cgs         ; Gate-Source Capacitance of M1
+C Cdb         ; Drain-Bulk Capacitance of M1
+C Csb         ; Source-Bulk Capacitance of M1
+C CL          ; Load Capacitance
+
+; Connections for the main transistor M1
+; We'll use node names (node_gate), (Vout) and rely on M1's block definition
+; to connect its terminals to these and other primary nodes like (VDD) and (GND).
+M1 { G:(node_gate), D:(VDD), S:(Vout), B:(GND) }
+
+; Input Path
+(GND) -- Vin_src (-+) -- (node_vin_pos) -- R1 -- (node_gate)
+
+; Parasitic Capacitances connected to the Gate of M1
+(node_gate) -- Cgd -- (VDD)  ; Cgd between Gate (node_gate/M1.G) and Drain (VDD/M1.D)
+(node_gate) -- Cgb -- (GND)  ; Cgb between Gate (node_gate/M1.G) and Bulk (GND/M1.B)
+(node_gate) -- Cgs -- (Vout) ; Cgs between Gate (node_gate/M1.G) and Source (Vout/M1.S)
+
+; Parasitic Capacitance connected to the Drain of M1 (besides Cgd)
+(VDD) -- Cdb -- (GND)        ; Cdb between Drain (VDD/M1.D) and Bulk (GND/M1.B)
+
+; Parasitic Capacitance connected to the Source of M1 (besides Cgs)
+(Vout) -- Csb -- (GND)       ; Csb between Source (Vout/M1.S) and Bulk (GND/M1.B)
+
+; Output Path Components
+; R2 and CL are effectively in parallel from Vout to GND.
+(Vout) -- [ R2 || CL ] -- (GND)
+
+; Node Aliases/Definitions (Implicit from M1 block and Vout usage)
+; (M1.G) : (node_gate)
+; (M1.D) : (VDD)
+; (M1.S) : (Vout)
+; (M1.B) : (GND)
+; (Vout_pin) : (Vout) ; Assuming Vout label in schematic is this node

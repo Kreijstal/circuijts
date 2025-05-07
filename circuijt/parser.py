@@ -19,10 +19,13 @@ class ProtoCircuitParser:
 
         self.COMPONENT_BLOCK_RE = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*{\s*(.*?)\s*}$', re.DOTALL)
         self.COMPONENT_BLOCK_ASSIGN_RE = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*\(([a-zA-Z0-9_.]+)\)')
-        self.DIRECT_ASSIGN_RE = re.compile(r'^\s*\(([a-zA-Z0-9_.]+)\)\s*:\s*\(([a-zA-Z0-9_.]+)\)\s*$')
+        # Modified to handle comments after the assignment
+        self.DIRECT_ASSIGN_RE = re.compile(r'^\s*\(([a-zA-Z0-9_.]+)\)\s*:\s*\(([a-zA-Z0-9_.]+)\)')
 
     def _parse_element(self, element_str, line_num, context="series"):
-        element_str = element_str.strip()
+        # Strip any inline comments first
+        element_str = self.COMMENT_RE.sub('', element_str).strip()
+        
         match_node = self.NODE_RE.match(element_str)
         if match_node:
             node_name = match_node.group(1)

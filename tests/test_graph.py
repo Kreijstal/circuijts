@@ -1,4 +1,3 @@
-
 import pytest
 from circuijt.parser import ProtoCircuitParser
 from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
@@ -247,23 +246,44 @@ def test_graph_to_ast_conversion():
     (in) -- R1 -- (mid) -- C1 -- (GND)
     """
     statements, errors = parser.parse_text(original_circuit)
-    assert not errors
+    assert not errors, f"Parser failed with errors: {errors}"
 
     # Convert to graph
     graph, dsu = ast_to_graph(statements)
     
+    # Print graph state for debugging
+    print("\nGraph state before reconstruction:")
+    print(f"Nodes: {[n for n in graph.nodes()]}")
+    print(f"Edges: {[(u,v,d) for u,v,d in graph.edges(data=True)]}")
+    print(f"Net equivalences (DSU): {[(n, dsu.find(n)) for n in dsu.parent]}")
+    
     # Convert back to AST
     reconstructed_ast = graph_to_structured_ast(graph, dsu)
     
+    # Print reconstructed AST for debugging
+    print("\nReconstructed AST:")
+    for stmt in reconstructed_ast:
+        print(f"Statement type: {stmt['type']}")
+        if stmt['type'] == 'declaration':
+            print(f"  Declaration: {stmt['component_type']} {stmt['instance_name']}")
+        elif stmt['type'] == 'series_connection':
+            path_desc = []
+            for el in stmt['path']:
+                if el['type'] == 'node':
+                    path_desc.append(f"({el['name']})")
+                elif el['type'] == 'component':
+                    path_desc.append(el['name'])
+            print(f"  Series path: {' -- '.join(path_desc)}")
+    
     # Verify essential elements are preserved
     decls = [s for s in reconstructed_ast if s["type"] == "declaration"]
-    assert len(decls) == 2  # R1 and C1
+    assert len(decls) == 2, f"Expected 2 declarations (R1, C1), found {len(decls)}: {decls}"
     
     series_connections_found = [s for s in reconstructed_ast if s["type"] == "series_connection"]
     # The reconstruction might create two series paths: (in)--R1--(mid) and (mid)--C1--(GND)
     # or one combined path depending on graph_to_structured_ast logic.
     # A simple check is that the components are part of some series connection.
-    assert len(series_connections_found) > 0 
+    assert len(series_connections_found) > 0, f"No series connections found in reconstructed AST. Full AST: {reconstructed_ast}"
     
     components_in_reconstructed_series = set()
     for s_conn in series_connections_found:
@@ -275,5 +295,5 @@ def test_graph_to_ast_conversion():
                     if pel.get("type") == "component":
                         components_in_reconstructed_series.add(pel["name"])
 
-    assert "R1" in components_in_reconstructed_series
-    assert "C1" in components_in_reconstructed_series
+    missing_comps = {'R1', 'C1'} - components_in_reconstructed_series
+    assert not missing_comps, f"Components missing from series connections: {missing_comps}. Found: {components_in_reconstructed_series}. Full AST: {reconstructed_ast}"

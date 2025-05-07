@@ -227,35 +227,70 @@ class GraphValidator:
 class CircuitValidator:
     def __init__(self, parsed_statements):
         self.parsed_statements = parsed_statements
-        self.component_db = ComponentDatabase() # Shared component database
+        self.component_db = ComponentDatabase()
+        self.debug_info = {}  # Store additional debug info
+
+    def _log_debug_info(self, category, info):
+        if category not in self.debug_info:
+            self.debug_info[category] = []
+        self.debug_info[category].append(info)
 
     def validate(self):
         all_errors = []
+        self.debug_info = {}  # Reset debug info
 
         # 1. AST Validation
         ast_validator = ASTValidator(self.parsed_statements)
         ast_errors = ast_validator.validate()
-        all_errors.extend(ast_errors)
-
-        # Proceed to graph validation only if AST is reasonably sound,
-        # or collect all errors regardless. For now, let's collect all.
-        # If AST errors are severe, graph construction might fail or be meaningless.
         
+        # Log AST validation details
+        self._log_debug_info('ast_validation', {
+            'total_statements': len(self.parsed_statements),
+            'declarations': [s for s in self.parsed_statements if s['type'] == 'declaration'],
+            'components': ast_validator.declared_component_types
+        })
+        
+        if ast_errors:
+            all_errors.extend([f"AST Validation Error: {err}" for err in ast_errors])
+
         # Get declared components from ASTValidator for GraphValidator
         declared_component_types = ast_validator.declared_component_types
 
         # 2. Graph Construction
-        # We need to handle potential errors during graph construction itself, though ast_to_graph doesn't explicitly return them.
-        # For now, assume ast_to_graph succeeds if AST validation passed, or that its internal prints are sufficient.
         try:
             graph, dsu = ast_to_graph(self.parsed_statements)
-        except Exception as e:
-            all_errors.append(f"Critical Error during graph construction: {e}. Further graph validation skipped.")
-            return all_errors
             
+            # Log graph construction details
+            self._log_debug_info('graph_construction', {
+                'nodes': len(graph.nodes()),
+                'edges': len(graph.edges()),
+                'nets': [n for n, d in graph.nodes(data=True) if d.get('node_kind') == 'electrical_net'],
+                'components': [n for n, d in graph.nodes(data=True) if d.get('node_kind') == 'component_instance']
+            })
+            
+        except Exception as e:
+            err_msg = f"Critical Error during graph construction: {e}. Debug info: "
+            err_msg += f"Statements being processed: {[s.get('type') for s in self.parsed_statements]}"
+            all_errors.append(err_msg)
+            return all_errors, self.debug_info
+
         # 3. Graph Validation
         graph_validator = GraphValidator(graph, dsu, self.component_db, declared_component_types)
         graph_errors = graph_validator.validate()
-        all_errors.extend(graph_errors)
         
-        return all_errors
+        if graph_errors:
+            # Add more context to graph validation errors
+            enriched_graph_errors = []
+            for err in graph_errors:
+                if "arity" in err.lower():
+                    # Add component connection details for arity errors
+                    comp_name = err.split("'")[1]  # Extract component name
+                    connections = [
+                        (n, d.get('terminal', 'unknown')) 
+                        for _, n, d in graph.edges(comp_name, data=True)
+                    ]
+                    err += f" (Found connections: {connections})"
+                enriched_graph_errors.append(f"Graph Validation Error: {err}")
+            all_errors.extend(enriched_graph_errors)
+
+        return all_errors, self.debug_info
