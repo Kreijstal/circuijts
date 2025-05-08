@@ -286,9 +286,10 @@ def test_voltage_source_polarity_variations():
     """Test graph creation for voltage sources with both (-+) and (+-) polarities."""
     parser = ProtoCircuitParser()
     circuit = """
-    V V_std # Standard polarity
-    V V_rev # Reversed polarity
-    R R1, R2
+    V V_std ; Standard polarity
+    V V_rev ; Reversed polarity
+    R R1
+    R R2
     (n1) -- V_std(-+) -- (n2) -- R1 -- (GND)
     (n3) -- V_rev(+-) -- (n4) -- R2 -- (GND)
     """
@@ -339,7 +340,8 @@ def test_no_duplicate_parallel_elements():
     """Test that parallel elements are not duplicated during graph construction."""
     parser = ProtoCircuitParser()
     circuit = """
-    R R_par1, R_par2
+    R R_par1
+    R R_par2
     C C_series
     (in) -- [ R_par1 || R_par2 ] -- (mid) -- C_series -- (GND)
     """
