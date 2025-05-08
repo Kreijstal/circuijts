@@ -14,15 +14,24 @@ class ProtoCircuitParser:
         self.DECLARATION_RE = re.compile(
             r'^[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*$'
         )  # Type InstanceName
-        self.NODE_RE = re.compile(r'^\(([a-zA-Z0-9_.]+)\)$')  # Allows dot for Dev.Term
-        self.COMPONENT_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')  # For instance names, type names, terminal names
+        self.NODE_RE = re.compile(
+            r'^\(([a-zA-Z0-9_.]+)\)$'
+        )  # Allows dot for Dev.Term
+        self.COMPONENT_NAME_RE = re.compile(
+            r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+        )  # For instance names, type names, terminal names
         self.SOURCE_RE = re.compile(
             r'^([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\((\-\+|\+-)\)$'
         )  # InstanceName (Polarity)
-        self.NAMED_CURRENT_RE = re.compile(r'^(->|<\-)([a-zA-Z_][a-zA-Z0-9_]*)$')
-        self.CONTROLLED_SOURCE_RE = re.compile(r'^(.*?)\s*\((->|<\-)\)$')
+        self.NAMED_CURRENT_RE = re.compile(
+            r'^(->|<\-)([a-zA-Z_][a-zA-Z0-9_]*)$'
+        )
+        self.CONTROLLED_SOURCE_RE = re.compile(
+            r'^(.*?)\s*\((->|<\-)\)$'
+        )
         self.COMPONENT_BLOCK_RE = re.compile(
-            r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*{\s*(.*?)\s*}$', re.DOTALL
+            r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*{\s*(.*?)\s*}$',
+            re.DOTALL
         )
         self.COMPONENT_BLOCK_ASSIGN_RE = re.compile(
             r'([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*\(([a-zA-Z0-9_.]+)\)'
@@ -38,9 +47,16 @@ class ProtoCircuitParser:
         match_node = self.NODE_RE.match(element_str)
         if match_node:
             node_name = match_node.group(1)
-            if not re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?', node_name):
-                 self.errors.append(f"L{line_num}: Invalid node name format '{node_name}' in '{element_str}'. Expected (name) or (Device.Terminal).")
-                 return {"type": "error", "message": f"Invalid node name format: {node_name}"}
+            valid_node = re.fullmatch(
+                r'[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?',
+                node_name
+            )
+            if not valid_node:
+                self.errors.append(
+                    f"L{line_num}: Invalid node name format '{node_name}' in '{element_str}'. "
+                    f"Expected (name) or (Device.Terminal)."
+                )
+                return {"type": "error", "message": f"Invalid node name format: {node_name}"}
             return {"type": "node", "name": node_name}
 
         match_source = self.SOURCE_RE.match(element_str)
