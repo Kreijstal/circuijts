@@ -103,7 +103,9 @@ def _process_declarations(G, parsed_statements, electrical_nets_dsu):
                 "line": stmt["line"],
                 "instance_node_name": inst_name,
             }
-            G.add_node(inst_name, node_kind="component_instance", instance_type=comp_type)
+            G.add_node(
+                inst_name, node_kind="component_instance", instance_type=comp_type
+            )
         elif stmt_type == "component_connection_block":
             comp_name = stmt["component_name"]
             for conn in stmt.get("connections", []):
@@ -118,11 +120,14 @@ def _process_declarations(G, parsed_statements, electrical_nets_dsu):
                     electrical_nets_dsu.add_set(item["name"])
     return declared_components
 
+
 def _handle_component_connection(G, stmt, declared_components, electrical_nets_dsu):
     """Handle component connection block statements."""
     comp_name = stmt["component_name"]
     if comp_name not in declared_components:
-        print(f"AST_TO_GRAPH_WARNING: Component '{comp_name}' in block not declared. Skipping.")
+        print(
+            f"AST_TO_GRAPH_WARNING: Component '{comp_name}' in block not declared. Skipping."
+        )
         return
 
     comp_node_name = declared_components[comp_name]["instance_node_name"]
@@ -142,6 +147,7 @@ def _handle_component_connection(G, stmt, declared_components, electrical_nets_d
             if ref_comp in declared_components:
                 G.add_edge(ref_comp, canonical_net, terminal=ref_term)
 
+
 def _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu):
     """Handle direct assignment statements."""
     s_node, t_node = stmt["source_node"], stmt["target_node"]
@@ -155,6 +161,7 @@ def _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu)
             comp_name, term = node_name.split(".", 1)
             if comp_name in declared_components:
                 G.add_edge(comp_name, canonical_net, terminal=term)
+
 
 def ast_to_graph(parsed_statements):
     """
@@ -183,12 +190,25 @@ def ast_to_graph(parsed_statements):
     internal_component_idx = 0
 
     # Pass 1: Process declarations
-    declared_components = _process_declarations(G, parsed_statements, electrical_nets_dsu)
-def _handle_series_connection(G, stmt, declared_components, electrical_nets_dsu, implicit_node_idx, internal_component_idx):
+    declared_components = _process_declarations(
+        G, parsed_statements, electrical_nets_dsu
+    )
+
+
+def _handle_series_connection(
+    G,
+    stmt,
+    declared_components,
+    electrical_nets_dsu,
+    implicit_node_idx,
+    internal_component_idx,
+):
     """Handle series connection statements."""
     path = stmt.get("path", [])
     if not path or path[0].get("type") != "node":
-        print(f"AST_TO_GRAPH_WARNING: Series path malformed or empty: {stmt.get('_path_str', 'N/A')}")
+        print(
+            f"AST_TO_GRAPH_WARNING: Series path malformed or empty: {stmt.get('_path_str', 'N/A')}"
+        )
         return implicit_node_idx, internal_component_idx
 
     # Process start node
@@ -236,12 +256,21 @@ def _handle_series_connection(G, stmt, declared_components, electrical_nets_dsu,
 
         # Handle different item types
         if item_type == "component":
-            _handle_series_component(G, item, declared_components, current_attach_point, next_attach_point)
+            _handle_series_component(
+                G, item, declared_components, current_attach_point, next_attach_point
+            )
         elif item_type == "source":
-            _handle_series_source(G, item, declared_components, current_attach_point, next_attach_point)
+            _handle_series_source(
+                G, item, declared_components, current_attach_point, next_attach_point
+            )
         elif item_type == "parallel_block":
             internal_component_idx = _handle_parallel_block(
-                G, item, declared_components, current_attach_point, next_attach_point, internal_component_idx
+                G,
+                item,
+                declared_components,
+                current_attach_point,
+                next_attach_point,
+                internal_component_idx,
             )
 
         current_attach_point = next_attach_point
@@ -250,16 +279,24 @@ def _handle_series_connection(G, stmt, declared_components, electrical_nets_dsu,
 
     return implicit_node_idx, internal_component_idx
 
-def _handle_series_component(G, item, declared_components, current_attach_point, next_attach_point):
+
+def _handle_series_component(
+    G, item, declared_components, current_attach_point, next_attach_point
+):
     """Handle component in series connection."""
     comp_name = item["name"]
     if comp_name not in declared_components:
         return
     comp_node_name = declared_components[comp_name]["instance_node_name"]
-    G.add_edge(comp_node_name, current_attach_point, terminal="t1_series", key="t1_series")
+    G.add_edge(
+        comp_node_name, current_attach_point, terminal="t1_series", key="t1_series"
+    )
     G.add_edge(comp_node_name, next_attach_point, terminal="t2_series", key="t2_series")
 
-def _handle_series_source(G, item, declared_components, current_attach_point, next_attach_point):
+
+def _handle_series_source(
+    G, item, declared_components, current_attach_point, next_attach_point
+):
     """Handle source in series connection."""
     source_name = item["name"]
     if source_name not in declared_components:
@@ -275,7 +312,15 @@ def _handle_series_source(G, item, declared_components, current_attach_point, ne
         G.add_edge(source_name, current_attach_point, terminal="pos", key="pos")
         G.add_edge(source_name, next_attach_point, terminal="neg", key="neg")
 
-def _handle_parallel_block(G, item, declared_components, current_attach_point, next_attach_point, internal_component_idx):
+
+def _handle_parallel_block(
+    G,
+    item,
+    declared_components,
+    current_attach_point,
+    next_attach_point,
+    internal_component_idx,
+):
     """Handle parallel block in series connection."""
     for pel in item.get("elements", []):
         element_node_name = None
@@ -283,31 +328,42 @@ def _handle_parallel_block(G, item, declared_components, current_attach_point, n
 
         if pel["type"] == "component":
             if pel["name"] in declared_components:
-                element_node_name = declared_components[pel["name"]]["instance_node_name"]
+                element_node_name = declared_components[pel["name"]][
+                    "instance_node_name"
+                ]
         elif pel["type"] == "controlled_source":
             element_node_name = f"_internal_cs_{internal_component_idx}"
-            attrs.update({
-                "instance_type": "controlled_source",
-                "expression": pel["expression"],
-                "direction": pel["direction"],
-            })
+            attrs.update(
+                {
+                    "instance_type": "controlled_source",
+                    "expression": pel["expression"],
+                    "direction": pel["direction"],
+                }
+            )
             internal_component_idx += 1
         elif pel["type"] == "noise_source":
             element_node_name = f"_internal_ns_{internal_component_idx}"
-            attrs.update({
-                "instance_type": "noise_source",
-                "id": pel["id"],
-                "direction": pel["direction"],
-            })
+            attrs.update(
+                {
+                    "instance_type": "noise_source",
+                    "id": pel["id"],
+                    "direction": pel["direction"],
+                }
+            )
             internal_component_idx += 1
 
         if element_node_name:
             if not G.has_node(element_node_name):
                 G.add_node(element_node_name, **attrs)
-            G.add_edge(element_node_name, current_attach_point, terminal="par_t1", key="par_t1")
-            G.add_edge(element_node_name, next_attach_point, terminal="par_t2", key="par_t2")
+            G.add_edge(
+                element_node_name, current_attach_point, terminal="par_t1", key="par_t1"
+            )
+            G.add_edge(
+                element_node_name, next_attach_point, terminal="par_t2", key="par_t2"
+            )
 
     return internal_component_idx
+
 
 def ast_to_graph(parsed_statements):
     """
@@ -336,7 +392,9 @@ def ast_to_graph(parsed_statements):
     internal_component_idx = 0
 
     # Pass 1: Process declarations
-    declared_components = _process_declarations(G, parsed_statements, electrical_nets_dsu)
+    declared_components = _process_declarations(
+        G, parsed_statements, electrical_nets_dsu
+    )
 
     # Pass 2: Process connections
     for stmt in parsed_statements:
@@ -344,13 +402,19 @@ def ast_to_graph(parsed_statements):
         if stmt_type == "declaration":
             continue
         elif stmt_type == "component_connection_block":
-            _handle_component_connection(G, stmt, declared_components, electrical_nets_dsu)
+            _handle_component_connection(
+                G, stmt, declared_components, electrical_nets_dsu
+            )
         elif stmt_type == "direct_assignment":
             _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu)
         elif stmt_type == "series_connection":
             implicit_node_idx, internal_component_idx = _handle_series_connection(
-                G, stmt, declared_components, electrical_nets_dsu,
-                implicit_node_idx, internal_component_idx
+                G,
+                stmt,
+                declared_components,
+                electrical_nets_dsu,
+                implicit_node_idx,
+                internal_component_idx,
             )
 
     # TODO: Optional: Create a "cleaner" graph where all net nodes are guaranteed to be their canonical names
