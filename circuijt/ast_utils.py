@@ -22,9 +22,7 @@ def _handle_component_connection(stmt, explicit_nodes):
     for conn in stmt.get("connections", []):
         if conn.get("node"):
             explicit_nodes.add(conn["node"])
-        if comp_name and conn.get(
-            "terminal"
-        ):  # comp_name validity checked by validator
+        if comp_name and conn.get("terminal"):  # comp_name validity checked by validator
             explicit_nodes.add(f"{comp_name}.{conn['terminal']}")
 
 
@@ -49,9 +47,7 @@ def _generate_implicit_nodes(structural_path_elements, implicit_node_counter):
         el_current = structural_path_elements[i]
         el_next = structural_path_elements[i + 1]
 
-        if el_current.get("type") not in ["node"] and el_next.get("type") not in [
-            "node"
-        ]:
+        if el_current.get("type") not in ["node"] and el_next.get("type") not in ["node"]:
             implicit_node_counter += 1
             implicit_nodes_generated.add(f"_implicit_node_{implicit_node_counter}")
 
@@ -65,9 +61,7 @@ def _handle_series_connection(
     implicit_node_counter,
     component_counts,
 ):
-    if stmt.get(
-        "_invalid_start"
-    ):  # Path structure compromised, skip for implicit node analysis
+    if stmt.get("_invalid_start"):  # Path structure compromised, skip for implicit node analysis
         return
 
     structural_path_elements = []
@@ -85,9 +79,7 @@ def _handle_series_connection(
             explicit_nodes.add(el["name"])
 
     # --- Implicit Node Generation for this series path ---
-    implicit_nodes_generated, implicit_node_counter = _generate_implicit_nodes(
-        structural_path_elements, implicit_node_counter
-    )
+    implicit_nodes_generated, implicit_node_counter = _generate_implicit_nodes(structural_path_elements, implicit_node_counter)
 
     for el in stmt.get("path", []):
         if el.get("type") == "parallel_block":
@@ -143,36 +135,26 @@ def summarize_circuit_elements(parsed_statements):
     }
 
 
-def _process_parallel_block(
-    block_elements, component_map, node_map, current_node, edges, path_id
-):
+def _process_parallel_block(block_elements, component_map, node_map, current_node, edges, path_id):
     for pel in block_elements:
         pel_type = pel.get("type")
         if pel_type == "component":
-            edges.append(
-                (current_node, pel["name"], {"path_id": path_id, "type": "series"})
-            )
+            edges.append((current_node, pel["name"], {"path_id": path_id, "type": "series"}))
             node_map.add(current_node)
             node_map.add(pel["name"])
         elif pel_type == "controlled_source":
             ctrl_source_id = f"ctrl_{path_id}"
-            edges.append(
-                (current_node, ctrl_source_id, {"path_id": path_id, "type": "series"})
-            )
+            edges.append((current_node, ctrl_source_id, {"path_id": path_id, "type": "series"}))
             node_map.add(current_node)
             node_map.add(ctrl_source_id)
         elif pel_type == "noise_source":
             noise_source_id = f"noise_{path_id}"
-            edges.append(
-                (current_node, noise_source_id, {"path_id": path_id, "type": "series"})
-            )
+            edges.append((current_node, noise_source_id, {"path_id": path_id, "type": "series"}))
             node_map.add(current_node)
             node_map.add(noise_source_id)
         elif pel_type == "error":  # If AST can contain errors within blocks
             error_id = f"error_{path_id}"
-            edges.append(
-                (current_node, error_id, {"path_id": path_id, "type": "series"})
-            )
+            edges.append((current_node, error_id, {"path_id": path_id, "type": "series"}))
             node_map.add(current_node)
             node_map.add(error_id)
 
@@ -184,9 +166,7 @@ def _proto_handle_declaration(stmt):
 
 def _proto_handle_component_connection_block(stmt):
     """Handle component connection block statement type for proto generation."""
-    assignments = [
-        f"{conn['terminal']}:({conn['node']})" for conn in stmt.get("connections", [])
-    ]
+    assignments = [f"{conn['terminal']}:({conn['node']})" for conn in stmt.get("connections", [])]
     return f"{stmt['component_name']} {{ {', '.join(assignments)} }}"
 
 
@@ -211,9 +191,7 @@ def _proto_handle_series_connection(stmt):
         elif item_type == "parallel_block":
             path_parts.append(_proto_handle_parallel_block(item))
         elif item_type == "error":
-            path_parts.append(
-                f"<ERROR_IN_PATH: {item.get('message', 'Malformed element')}>"
-            )
+            path_parts.append(f"<ERROR_IN_PATH: {item.get('message', 'Malformed element')}>")
         else:
             path_parts.append(f"<UNKNOWN_PATH_TYPE: {item_type}>")
     return " -- ".join(path_parts)
@@ -231,9 +209,7 @@ def _proto_handle_parallel_block(item):
         elif pel_type == "noise_source":
             elements_strs.append(f"{pel['id']} ({pel['direction']})")
         elif pel_type == "error":
-            elements_strs.append(
-                f"<ERROR_IN_PARALLEL: {pel.get('message', 'Malformed element')}>"
-            )
+            elements_strs.append(f"<ERROR_IN_PARALLEL: {pel.get('message', 'Malformed element')}>")
         else:
             elements_strs.append(f"<UNKNOWN_PARALLEL_TYPE: {pel_type}>")
     return f"[ {' || '.join(elements_strs)} ]"
@@ -313,9 +289,4 @@ def find_declarations_by_type(statements, component_type):
     Returns:
         list: List of matching declaration statements
     """
-    return [
-        stmt
-        for stmt in statements
-        if stmt.get("type") == "declaration"
-        and stmt.get("component_type") == component_type
-    ]
+    return [stmt for stmt in statements if stmt.get("type") == "declaration" and stmt.get("component_type") == component_type]

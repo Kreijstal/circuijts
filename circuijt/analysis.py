@@ -27,11 +27,7 @@ def detect_short_circuits(graph, dsu):
     detected_shorts = []
 
     # 1. Check for components shorting their own terminals
-    component_instance_nodes = [
-        n
-        for n, data in graph.nodes(data=True)
-        if data.get("node_kind") == "component_instance"
-    ]
+    component_instance_nodes = [n for n, data in graph.nodes(data=True) if data.get("node_kind") == "component_instance"]
 
     for comp_name in component_instance_nodes:
         term_to_canonical_net_map, _ = get_component_connectivity(graph, comp_name)
@@ -53,9 +49,7 @@ def detect_short_circuits(graph, dsu):
                     {
                         "type": "component_self_short",
                         "component": comp_name,
-                        "component_type": graph.nodes[comp_name].get(
-                            "instance_type", "Unknown"
-                        ),
+                        "component_type": graph.nodes[comp_name].get("instance_type", "Unknown"),
                         "terminals": sorted(list(set(terminals_list))),
                         "net": preferred_net_name,
                         "canonical_net": canonical_net,

@@ -162,9 +162,7 @@ def get_nmos_id_suffix(nmos_instance_name: str) -> str:
     return nmos_instance_name  # Fallback to full name if no common pattern matched
 
 
-def generate_nmos_small_signal_model_ast(
-    nmos_original_instance_name: str, external_nets_map: dict
-):
+def generate_nmos_small_signal_model_ast(nmos_original_instance_name: str, external_nets_map: dict):
     """Generates AST statements for NMOS small-signal model."""
     id_suffix = get_nmos_id_suffix(nmos_original_instance_name)
 
@@ -274,17 +272,12 @@ def _get_nmos_connections(initial_graph, initial_dsu, nmos_to_replace):
         return None
 
     node_data = initial_graph.nodes[nmos_to_replace]
-    if not (
-        node_data.get("node_kind") == "component_instance"
-        and node_data.get("instance_type") == "Nmos"
-    ):
+    if not (node_data.get("node_kind") == "component_instance" and node_data.get("instance_type") == "Nmos"):
         print(f"Error: '{nmos_to_replace}' is not an NMOS instance.")
         return None
 
     print(f"Found NMOS instance '{nmos_to_replace}' with connections:")
-    term_to_canonical_net_map, _ = get_component_connectivity(
-        initial_graph, nmos_to_replace
-    )
+    term_to_canonical_net_map, _ = get_component_connectivity(initial_graph, nmos_to_replace)
 
     connections = {}
     for terminal, canonical_net_name in term_to_canonical_net_map.items():
@@ -320,10 +313,7 @@ def _combine_asts(initial_ast, ss_model_ast, nmos_to_replace):
 
     # Add new declarations from model AST
     for stmt in ss_model_ast:
-        if (
-            stmt["type"] == "declaration"
-            and stmt["instance_name"] not in processed_decls
-        ):
+        if stmt["type"] == "declaration" and stmt["instance_name"] not in processed_decls:
             combined.append(stmt)
             processed_decls.add(stmt["instance_name"])
 
@@ -345,19 +335,15 @@ def _combine_asts(initial_ast, ss_model_ast, nmos_to_replace):
 
 def _should_skip_statement(stmt, nmos_to_replace):
     """Determine if statement should be skipped due to NMOS replacement."""
-    if (
-        stmt["type"] == "component_connection_block"
-        and stmt["component_name"] == nmos_to_replace
-    ):
+    if stmt["type"] == "component_connection_block" and stmt["component_name"] == nmos_to_replace:
         return True
     if stmt["type"] == "direct_assignment":
-        return stmt.get("source_node", "").startswith(
+        return stmt.get("source_node", "").startswith(nmos_to_replace + ".") or stmt.get("target_node", "").startswith(
             nmos_to_replace + "."
-        ) or stmt.get("target_node", "").startswith(nmos_to_replace + ".")
+        )
     if stmt["type"] == "series_connection":
         return any(
-            item.get("name", "") == nmos_to_replace
-            or item.get("name", "").startswith(nmos_to_replace + ".")
+            item.get("name", "") == nmos_to_replace or item.get("name", "").startswith(nmos_to_replace + ".")
             for item in stmt.get("path", [])
         )
     return False
@@ -456,9 +442,5 @@ if __name__ == "__main__":
     """
     perform_nmos_ss_transformation_and_flatten(test_circuit_for_nmos_replacement, "M1")
 
-    print(
-        "\n\n===================================\nNow trying with M25ext\n==================================="
-    )
-    perform_nmos_ss_transformation_and_flatten(
-        test_circuit_for_nmos_replacement, "M25ext"
-    )
+    print("\n\n===================================\nNow trying with M25ext\n===================================")
+    perform_nmos_ss_transformation_and_flatten(test_circuit_for_nmos_replacement, "M25ext")

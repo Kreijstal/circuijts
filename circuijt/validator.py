@@ -12,24 +12,16 @@ class ASTValidator:
         self.errors = []
         self.component_db = ComponentDatabase()
         self.VALID_COMPONENT_TYPES = set(self.component_db.components.keys())
-        self.declared_component_types = (
-            {}
-        )  # InstanceName -> {"type": TypeStr, "line": line_num}
+        self.declared_component_types = {}  # InstanceName -> {"type": TypeStr, "line": line_num}
         self.explicitly_defined_nodes = set()
         self.node_connection_points = {}
 
     def _add_error(self, message, line_num=None):
-        prefix = (
-            f"L{line_num}: AST Validation Error: "
-            if line_num is not None
-            else "AST Validation Error: "
-        )
+        prefix = f"L{line_num}: AST Validation Error: " if line_num is not None else "AST Validation Error: "
         self.errors.append(f"{prefix}{message}")
 
     def _check_and_register_node(self, node_name, line_num, connected_to_info=""):
-        if not re.fullmatch(
-            r"[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?", node_name
-        ):
+        if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?", node_name):
             self._add_error(f"Node name '{node_name}' has an invalid format.", line_num)
             return False  # Invalid node format
 
@@ -138,9 +130,7 @@ class ASTValidator:
         elif not stmt["connections"] and not original_assignments_str:
             self._add_error(f"Component block for '{comp_name}' is empty.", line_num)
 
-        comp_type_from_decl = self.declared_component_types.get(comp_name, {}).get(
-            "type"
-        )
+        comp_type_from_decl = self.declared_component_types.get(comp_name, {}).get("type")
         if comp_type_from_decl:
             expected_arity = self.component_db.get_arity(comp_type_from_decl)
             if expected_arity is not None and len(stmt["connections"]) > expected_arity:
@@ -167,9 +157,7 @@ class ASTValidator:
             line_num,
             f"block assignment to ({conn['node']})",
         )
-        self._check_and_register_node(
-            conn["node"], line_num, f"{comp_name}.{conn['terminal']}"
-        )
+        self._check_and_register_node(conn["node"], line_num, f"{comp_name}.{conn['terminal']}")
 
     def _validate_series_connection(self, stmt, line_num):
         """Validate a series connection statement."""
@@ -194,9 +182,7 @@ class ASTValidator:
             )
             return
 
-        is_structurally_valid_path = len(path) > 1 or (
-            len(path) == 1 and path[0].get("type") not in ["node", "error"]
-        )
+        is_structurally_valid_path = len(path) > 1 or (len(path) == 1 and path[0].get("type") not in ["node", "error"])
         if not is_structurally_valid_path and path:
             first_el_info = path[0].get("name", str(path[0]))
             self._add_error(
@@ -212,8 +198,7 @@ class ASTValidator:
             item_type = item.get("type")
             if item_type == "error":
                 self._add_error(
-                    f"Path segment '{item.get('message', 'unknown error')}' "
-                    f"from '{stmt.get('_path_str', 'N/A')}' error.",
+                    f"Path segment '{item.get('message', 'unknown error')}' " f"from '{stmt.get('_path_str', 'N/A')}' error.",
                     line_num,
                 )
             elif item_type == "node":
@@ -298,8 +283,7 @@ class ASTValidator:
             )
         elif pel_type not in ["component", "controlled_source", "noise_source"]:
             self._add_error(
-                f"Invalid type '{pel_type}' in parallel block. "
-                f"Allowed: component, controlled_source, noise_source.",
+                f"Invalid type '{pel_type}' in parallel block. " f"Allowed: component, controlled_source, noise_source.",
                 line_num,
             )
         elif pel_type == "component":
@@ -318,12 +302,8 @@ class ASTValidator:
                 line_num,
             )
 
-        self._check_and_register_node(
-            src_node, line_num, f"direct assignment to ({tgt_node})"
-        )
-        self._check_and_register_node(
-            tgt_node, line_num, f"direct assignment from ({src_node})"
-        )
+        self._check_and_register_node(src_node, line_num, f"direct assignment to ({tgt_node})")
+        self._check_and_register_node(tgt_node, line_num, f"direct assignment from ({src_node})")
         return self.errors
 
 
@@ -336,25 +316,17 @@ class GraphValidator:
         self.errors = []
 
     def _add_error(self, message, component_name=None):
-        prefix = (
-            f"Graph Validation Error for component '{component_name}': "
-            if component_name
-            else "Graph Validation Error: "
-        )
+        prefix = f"Graph Validation Error for component '{component_name}': " if component_name else "Graph Validation Error: "
         self.errors.append(f"{prefix}{message}")
 
     def validate(self):
         self.errors = []
         component_instance_nodes = [
-            n
-            for n, data in self.graph.nodes(data=True)
-            if data.get("node_kind") == "component_instance"
+            n for n, data in self.graph.nodes(data=True) if data.get("node_kind") == "component_instance"
         ]
 
         for comp_name in component_instance_nodes:
-            if comp_name.startswith(
-                "_internal_"
-            ):  # Skip internal components like VCCS from parallel blocks
+            if comp_name.startswith("_internal_"):  # Skip internal components like VCCS from parallel blocks
                 continue
 
             comp_declaration_info = self.declared_component_types.get(comp_name)
@@ -370,16 +342,12 @@ class GraphValidator:
             line_num = comp_declaration_info.get("line")  # For error reporting context
 
             expected_arity = self.component_db.get_arity(comp_type)
-            if (
-                expected_arity is None
-            ):  # Unknown component type to the DB, already flagged by ASTValidator
+            if expected_arity is None:  # Unknown component type to the DB, already flagged by ASTValidator
                 continue
 
             # Get actual connections from the graph
             # get_component_connectivity returns: connections_map (term -> net), raw_connections (list of dicts)
-            connections_map, raw_connections = get_component_connectivity(
-                self.graph, comp_name
-            )
+            connections_map, raw_connections = get_component_connectivity(self.graph, comp_name)
             actual_distinct_terminals_connected = len(connections_map)
 
             if actual_distinct_terminals_connected > expected_arity:
@@ -389,10 +357,7 @@ class GraphValidator:
                     f"exceeding its defined arity of {expected_arity}.",
                     comp_name,
                 )
-            elif (
-                self.graph.degree(comp_name) > 0
-                and actual_distinct_terminals_connected < expected_arity
-            ):
+            elif self.graph.degree(comp_name) > 0 and actual_distinct_terminals_connected < expected_arity:
                 # Only raise if the component is actually connected to something but not fully
                 # An unconnected declared component is a different kind of issue (or not an issue)
                 self._add_error(
@@ -433,9 +398,7 @@ class CircuitValidator:
             "ast_validation",
             {
                 "total_statements": len(self.parsed_statements),
-                "declarations": [
-                    s for s in self.parsed_statements if s["type"] == "declaration"
-                ],
+                "declarations": [s for s in self.parsed_statements if s["type"] == "declaration"],
                 "components": ast_validator.declared_component_types,
             },
         )
@@ -456,16 +419,8 @@ class CircuitValidator:
                 {
                     "nodes": len(graph.nodes()),
                     "edges": len(graph.edges()),
-                    "nets": [
-                        n
-                        for n, d in graph.nodes(data=True)
-                        if d.get("node_kind") == "electrical_net"
-                    ],
-                    "components": [
-                        n
-                        for n, d in graph.nodes(data=True)
-                        if d.get("node_kind") == "component_instance"
-                    ],
+                    "nets": [n for n, d in graph.nodes(data=True) if d.get("node_kind") == "electrical_net"],
+                    "components": [n for n, d in graph.nodes(data=True) if d.get("node_kind") == "component_instance"],
                 },
             )
 
@@ -476,9 +431,7 @@ class CircuitValidator:
             return all_errors, self.debug_info
 
         # 3. Graph Validation
-        graph_validator = GraphValidator(
-            graph, dsu, self.component_db, declared_component_types
-        )
+        graph_validator = GraphValidator(graph, dsu, self.component_db, declared_component_types)
         graph_errors = graph_validator.validate()
 
         if graph_errors:
@@ -488,10 +441,7 @@ class CircuitValidator:
                 if "arity" in err.lower():
                     # Add component connection details for arity errors
                     comp_name = err.split("'")[1]  # Extract component name
-                    connections = [
-                        (n, d.get("terminal", "unknown"))
-                        for _, n, d in graph.edges(comp_name, data=True)
-                    ]
+                    connections = [(n, d.get("terminal", "unknown")) for _, n, d in graph.edges(comp_name, data=True)]
                     err += f" (Found connections: {connections})"
                 enriched_graph_errors.append(f"Graph Validation Error: {err}")
             all_errors.extend(enriched_graph_errors)

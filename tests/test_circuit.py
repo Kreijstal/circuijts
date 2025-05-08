@@ -146,17 +146,13 @@ def test_invalid_circuit_validator(invalid_parsed_statements):
     assert validation_errors, "Expected validation errors but found none"
 
     # Print debug info on failure
-    if not any(
-        "R2" in error and "arity" in error.lower() for error in validation_errors
-    ):
+    if not any("R2" in error and "arity" in error.lower() for error in validation_errors):
         print("\nDebug Information:")
         if "ast_validation" in debug_info:
             print("\nAST Validation Details:")
             for info in debug_info["ast_validation"]:
                 print(f"Total statements: {info['total_statements']}")
-                print(
-                    f"Declarations: {[d['instance_name'] for d in info['declarations']]}"
-                )
+                print(f"Declarations: {[d['instance_name'] for d in info['declarations']]}")
                 print(f"Component types: {info['components']}")
 
         if "graph_construction" in debug_info:
@@ -167,9 +163,7 @@ def test_invalid_circuit_validator(invalid_parsed_statements):
                 print(f"Net nodes: {info['nets']}")
                 print(f"Component nodes: {info['components']}")
 
-        raise AssertionError(
-            "Expected error about R2 having incorrect arity. Debug info above."
-        )
+        raise AssertionError("Expected error about R2 having incorrect arity. Debug info above.")
     print("Validation failed as expected with R2 arity error")
 
 
@@ -189,9 +183,7 @@ def test_valid_circuit_validator(valid_parsed_statements):
             print("\nAST Validation Details:")
             for info in debug_info["ast_validation"]:
                 print(f"Total statements: {info['total_statements']}")
-                print(
-                    f"Declarations: {[d['instance_name'] for d in info['declarations']]}"
-                )
+                print(f"Declarations: {[d['instance_name'] for d in info['declarations']]}")
                 print(f"Component types: {info['components']}")
 
         if "graph_construction" in debug_info:

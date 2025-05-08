@@ -88,11 +88,7 @@ class DSU:
         return {
             "root": root,
             "is_preferred": root in self.preferred_roots,
-            "preference_index": (
-                self.preferred_root_order.index(root)
-                if root in self.preferred_root_order
-                else float("inf")
-            ),
+            "preference_index": (self.preferred_root_order.index(root) if root in self.preferred_root_order else float("inf")),
         }
 
     def get_all_canonical_representatives(self):
@@ -118,9 +114,7 @@ def _process_declarations(G, parsed_statements, electrical_nets_dsu):
                 "line": stmt["line"],
                 "instance_node_name": inst_name,
             }
-            G.add_node(
-                inst_name, node_kind="component_instance", instance_type=comp_type
-            )
+            G.add_node(inst_name, node_kind="component_instance", instance_type=comp_type)
         elif stmt_type == "component_connection_block":
             comp_name = stmt["component_name"]
             for conn in stmt.get("connections", []):
@@ -140,9 +134,7 @@ def _handle_component_connection(G, stmt, declared_components, electrical_nets_d
     """Handle component connection block statements."""
     comp_name = stmt["component_name"]
     if comp_name not in declared_components:
-        print(
-            f"AST_TO_GRAPH_WARNING: Component '{comp_name}' in block not declared. Skipping."
-        )
+        print(f"AST_TO_GRAPH_WARNING: Component '{comp_name}' in block not declared. Skipping.")
         return
 
     comp_node_name = declared_components[comp_name]["instance_node_name"]
@@ -171,9 +163,7 @@ def _handle_component_connection(G, stmt, declared_components, electrical_nets_d
 def _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu):
     """Handle direct assignment statements."""
     s_node, t_node = stmt["source_node"], stmt["target_node"]
-    electrical_nets_dsu.union(
-        s_node, t_node, "direct_assignment", {"source": s_node, "target": t_node}
-    )
+    electrical_nets_dsu.union(s_node, t_node, "direct_assignment", {"source": s_node, "target": t_node})
     canonical_net = electrical_nets_dsu.find(s_node)
     if not G.has_node(canonical_net):
         G.add_node(canonical_net, node_kind="electrical_net")
@@ -196,9 +186,7 @@ def _handle_series_connection(
     """Handle series connection statements."""
     path = stmt.get("path", [])
     if not path or path[0].get("type") != "node":
-        print(
-            f"AST_TO_GRAPH_WARNING: Series path malformed or empty: {stmt.get('_path_str', 'N/A')}"
-        )
+        print(f"AST_TO_GRAPH_WARNING: Series path malformed or empty: {stmt.get('_path_str', 'N/A')}")
         return implicit_node_idx, internal_component_idx
 
     # Process start node
@@ -215,18 +203,16 @@ def _handle_series_connection(
     # Process remaining path elements
     for i in range(1, len(path)):
         item = path[i]
-        current_attach_point, implicit_node_idx, internal_component_idx = (
-            _process_series_path_item(
-                G,
-                item,
-                path,
-                i,
-                declared_components,
-                electrical_nets_dsu,
-                current_attach_point,
-                implicit_node_idx,
-                internal_component_idx,
-            )
+        current_attach_point, implicit_node_idx, internal_component_idx = _process_series_path_item(
+            G,
+            item,
+            path,
+            i,
+            declared_components,
+            electrical_nets_dsu,
+            current_attach_point,
+            implicit_node_idx,
+            internal_component_idx,
         )
 
     return implicit_node_idx, internal_component_idx
@@ -275,13 +261,9 @@ def _process_series_path_item(
 
     # Handle different item types
     if item_type == "component":
-        _handle_series_component(
-            G, item, declared_components, current_attach_point, next_attach_point
-        )
+        _handle_series_component(G, item, declared_components, current_attach_point, next_attach_point)
     elif item_type == "source":
-        _handle_series_source(
-            G, item, declared_components, current_attach_point, next_attach_point
-        )
+        _handle_series_source(G, item, declared_components, current_attach_point, next_attach_point)
     elif item_type == "parallel_block":
         internal_component_idx = _handle_parallel_block(
             G,
@@ -300,23 +282,17 @@ def _process_series_path_item(
     return next_attach_point, implicit_node_idx, internal_component_idx
 
 
-def _handle_series_component(
-    G, item, declared_components, current_attach_point, next_attach_point
-):
+def _handle_series_component(G, item, declared_components, current_attach_point, next_attach_point):
     """Handle component in series connection."""
     comp_name = item["name"]
     if comp_name not in declared_components:
         return
     comp_node_name = declared_components[comp_name]["instance_node_name"]
-    G.add_edge(
-        comp_node_name, current_attach_point, terminal="t1_series", key="t1_series"
-    )
+    G.add_edge(comp_node_name, current_attach_point, terminal="t1_series", key="t1_series")
     G.add_edge(comp_node_name, next_attach_point, terminal="t2_series", key="t2_series")
 
 
-def _handle_series_source(
-    G, item, declared_components, current_attach_point, next_attach_point
-):
+def _handle_series_source(G, item, declared_components, current_attach_point, next_attach_point):
     """Handle source in series connection."""
     source_name = item["name"]
     if source_name not in declared_components:
@@ -348,9 +324,7 @@ def _handle_parallel_block(
 
         if pel["type"] == "component":
             if pel["name"] in declared_components:
-                element_node_name = declared_components[pel["name"]][
-                    "instance_node_name"
-                ]
+                element_node_name = declared_components[pel["name"]]["instance_node_name"]
         elif pel["type"] == "controlled_source":
             element_node_name = f"_internal_cs_{internal_component_idx}"
             attrs.update(
@@ -375,12 +349,8 @@ def _handle_parallel_block(
         if element_node_name:
             if not G.has_node(element_node_name):
                 G.add_node(element_node_name, **attrs)
-            G.add_edge(
-                element_node_name, current_attach_point, terminal="par_t1", key="par_t1"
-            )
-            G.add_edge(
-                element_node_name, next_attach_point, terminal="par_t2", key="par_t2"
-            )
+            G.add_edge(element_node_name, current_attach_point, terminal="par_t1", key="par_t1")
+            G.add_edge(element_node_name, next_attach_point, terminal="par_t2", key="par_t2")
 
     return internal_component_idx
 
@@ -412,9 +382,7 @@ def ast_to_graph(parsed_statements):
     internal_component_idx = 0
 
     # Pass 1: Process declarations
-    declared_components = _process_declarations(
-        G, parsed_statements, electrical_nets_dsu
-    )
+    declared_components = _process_declarations(G, parsed_statements, electrical_nets_dsu)
 
     # Pass 2: Process connections
     for stmt in parsed_statements:
@@ -422,9 +390,7 @@ def ast_to_graph(parsed_statements):
         if stmt_type == "declaration":
             continue
         elif stmt_type == "component_connection_block":
-            _handle_component_connection(
-                G, stmt, declared_components, electrical_nets_dsu
-            )
+            _handle_component_connection(G, stmt, declared_components, electrical_nets_dsu)
         elif stmt_type == "direct_assignment":
             _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu)
         elif stmt_type == "series_connection":
@@ -465,22 +431,14 @@ def get_preferred_net_name_for_reconstruction(
     # Priority:
     # 1. User-defined, non-device terminal, non-significant common rail names (prefer shorter, then alpha)
     user_named = sorted(
-        [
-            m
-            for m in members
-            if not m.startswith("_implicit_")
-            and "." not in m
-            and m not in known_significant_nodes
-        ],
+        [m for m in members if not m.startswith("_implicit_") and "." not in m and m not in known_significant_nodes],
         key=lambda x: (len(x), x),
     )
     if user_named:
         return user_named[0]
 
     # 2. Known significant common rails (prefer shorter, then alpha)
-    sigs = sorted(
-        [m for m in members if m in known_significant_nodes], key=lambda x: (len(x), x)
-    )
+    sigs = sorted([m for m in members if m in known_significant_nodes], key=lambda x: (len(x), x))
     if sigs:
         return sigs[0]
 
@@ -515,9 +473,7 @@ def get_preferred_net_name_for_reconstruction(
 def get_component_connectivity(graph, comp_name):
     """Helper to find nets a component is connected to and via which terminals."""
     connections = {}  # terminal_name -> canonical_net_name
-    raw_connections = (
-        []
-    )  # list of {'term': ..., 'net_canon': ...} for ordering later if needed
+    raw_connections = []  # list of {'term': ..., 'net_canon': ...} for ordering later if needed
 
     # For MultiGraph, we need to handle potentially multiple edges per node pair
     for u, v, edge_data in graph.edges(comp_name, data=True):
@@ -525,34 +481,22 @@ def get_component_connectivity(graph, comp_name):
         if graph.nodes[neighbor_net_canonical].get("node_kind") == "electrical_net":
             terminal = edge_data.get("terminal")
             if terminal:
-                if (
-                    terminal not in connections
-                ):  # Keep first occurrence of each terminal
+                if terminal not in connections:  # Keep first occurrence of each terminal
                     connections[terminal] = neighbor_net_canonical
-                raw_connections.append(
-                    {"term": terminal, "net_canon": neighbor_net_canonical}
-                )
+                raw_connections.append({"term": terminal, "net_canon": neighbor_net_canonical})
     return connections, raw_connections
 
 
 def _get_component_nodes_data(graph):
     """Get all component nodes with their full attributes."""
-    return {
-        n: graph.nodes[n]
-        for n in graph.nodes
-        if graph.nodes[n].get("node_kind") == "component_instance"
-    }
+    return {n: graph.nodes[n] for n in graph.nodes if graph.nodes[n].get("node_kind") == "component_instance"}
 
 
 def _emit_declarations(component_nodes_data):
     """Emit all component declarations."""
     ast_statements = []
     all_declared_comp_names = sorted(
-        [
-            n
-            for n, data in component_nodes_data.items()
-            if not n.startswith("_internal_") and data.get("instance_type")
-        ]
+        [n for n, data in component_nodes_data.items() if not n.startswith("_internal_") and data.get("instance_type")]
     )
 
     for comp_name in all_declared_comp_names:
@@ -567,9 +511,7 @@ def _emit_declarations(component_nodes_data):
     return ast_statements, all_declared_comp_names
 
 
-def _reconstruct_multi_terminal_blocks(
-    graph, component_nodes_data, dsu, comp_names, processed_components
-):
+def _reconstruct_multi_terminal_blocks(graph, component_nodes_data, dsu, comp_names, processed_components):
     """Reconstruct connection blocks for multi-terminal components."""
     ast_statements = []
     MULTI_TERMINAL_TYPES = {"Nmos", "Pmos", "Opamp"}
@@ -579,9 +521,7 @@ def _reconstruct_multi_terminal_blocks(
         if comp_type in MULTI_TERMINAL_TYPES:
             connections_map, _ = get_component_connectivity(graph, comp_name)
             if connections_map:
-                block_connections = _create_block_connections(
-                    comp_type, connections_map, dsu
-                )
+                block_connections = _create_block_connections(comp_type, connections_map, dsu)
                 if block_connections:
                     ast_statements.append(
                         {
@@ -605,17 +545,13 @@ def _create_block_connections(comp_type, connections_map, dsu):
 
     present_terminals = list(connections_map.keys())
     sorted_terminals = [t for t in terminal_order_preference if t in present_terminals]
-    remaining_terminals = sorted(
-        [t for t in present_terminals if t not in sorted_terminals]
-    )
+    remaining_terminals = sorted([t for t in present_terminals if t not in sorted_terminals])
     final_sorted_terminals = sorted_terminals + remaining_terminals
 
     block_connections = []
     for term in final_sorted_terminals:
         net_canonical = connections_map[term]
-        preferred_net_name = get_preferred_net_name_for_reconstruction(
-            net_canonical, dsu, allow_implicit_if_only_option=True
-        )
+        preferred_net_name = get_preferred_net_name_for_reconstruction(net_canonical, dsu, allow_implicit_if_only_option=True)
         block_connections.append({"terminal": term, "node": preferred_net_name})
     return block_connections
 
@@ -623,20 +559,14 @@ def _create_block_connections(comp_type, connections_map, dsu):
 def _reconstruct_series_paths(graph, component_nodes_data, dsu, processed_components):
     """Reconstruct series and parallel paths."""
     ast_statements = []
-    net_pair_to_components = _group_components_by_net_pairs(
-        graph, component_nodes_data, processed_components
-    )
+    net_pair_to_components = _group_components_by_net_pairs(graph, component_nodes_data, processed_components)
 
     for (net1_canon, net2_canon), comps_in_group in net_pair_to_components.items():
         if not comps_in_group:
             continue
 
-        path_elements = _create_path_elements(
-            net1_canon, net2_canon, comps_in_group, component_nodes_data, dsu
-        )
-        ast_statements.append(
-            {"type": "series_connection", "path": path_elements, "line": 0}
-        )
+        path_elements = _create_path_elements(net1_canon, net2_canon, comps_in_group, component_nodes_data, dsu)
+        ast_statements.append({"type": "series_connection", "path": path_elements, "line": 0})
         processed_components.update(comps_in_group)
 
     return ast_statements
@@ -652,10 +582,7 @@ def _group_components_by_net_pairs(graph, component_nodes_data, processed_compon
             n
             for n, data in component_nodes_data.items()
             if data.get("instance_type")
-            and (
-                not n.startswith("_internal_")
-                or data.get("instance_type") in ["controlled_source", "noise_source"]
-            )
+            and (not n.startswith("_internal_") or data.get("instance_type") in ["controlled_source", "noise_source"])
             and n not in processed_components
         ]
     )
@@ -669,9 +596,7 @@ def _group_components_by_net_pairs(graph, component_nodes_data, processed_compon
             if len(distinct_nets) == 2:
                 valid_terminals = _get_valid_terminals(comp_type, connections_map)
                 if len(valid_terminals) == 2:
-                    nets_for_key = tuple(
-                        sorted([connections_map[term] for term in valid_terminals])
-                    )
+                    nets_for_key = tuple(sorted([connections_map[term] for term in valid_terminals]))
                     if nets_for_key not in net_pair_to_components:
                         net_pair_to_components[nets_for_key] = []
                     net_pair_to_components[nets_for_key].append(comp_name)
@@ -692,34 +617,24 @@ def _get_valid_terminals(comp_type, connections_map):
     return valid_terminals
 
 
-def _create_path_elements(
-    net1_canon, net2_canon, comps_in_group, component_nodes_data, dsu
-):
+def _create_path_elements(net1_canon, net2_canon, comps_in_group, component_nodes_data, dsu):
     """Create path elements for series/parallel reconstruction."""
     path_elements = [
         {
             "type": "node",
-            "name": get_preferred_net_name_for_reconstruction(
-                net1_canon, dsu, allow_implicit_if_only_option=True
-            ),
+            "name": get_preferred_net_name_for_reconstruction(net1_canon, dsu, allow_implicit_if_only_option=True),
         }
     ]
 
     if len(comps_in_group) == 1:
-        path_elements.extend(
-            _create_single_component_path(comps_in_group[0], component_nodes_data)
-        )
+        path_elements.extend(_create_single_component_path(comps_in_group[0], component_nodes_data))
     else:
-        path_elements.append(
-            _create_parallel_block(comps_in_group, component_nodes_data)
-        )
+        path_elements.append(_create_parallel_block(comps_in_group, component_nodes_data))
 
     path_elements.append(
         {
             "type": "node",
-            "name": get_preferred_net_name_for_reconstruction(
-                net2_canon, dsu, allow_implicit_if_only_option=True
-            ),
+            "name": get_preferred_net_name_for_reconstruction(net2_canon, dsu, allow_implicit_if_only_option=True),
         }
     )
     return path_elements
@@ -806,9 +721,7 @@ def _reconstruct_direct_assignments(dsu):
             for member_node in members:
                 if member_node == preferred_target_name:
                     continue
-                if member_node.startswith(
-                    "_implicit_"
-                ) and not preferred_target_name.startswith("_implicit_"):
+                if member_node.startswith("_implicit_") and not preferred_target_name.startswith("_implicit_"):
                     continue
 
                 alias_pair_key = frozenset({member_node, preferred_target_name})
@@ -845,11 +758,7 @@ def graph_to_structured_ast(graph, dsu):
     )
 
     # 3. Reconstruct series/parallel paths
-    ast_statements.extend(
-        _reconstruct_series_paths(
-            graph, component_nodes_data, dsu, processed_components
-        )
-    )
+    ast_statements.extend(_reconstruct_series_paths(graph, component_nodes_data, dsu, processed_components))
 
     # 4. Reconstruct direct assignments
     ast_statements.extend(_reconstruct_direct_assignments(dsu))

@@ -178,14 +178,12 @@ def _extract_mos_transistors(graph):
     nmos_transistors = [
         node
         for node, data in graph.nodes(data=True)
-        if data.get("node_kind") == "component_instance"
-        and data.get("instance_type") == "Nmos"
+        if data.get("node_kind") == "component_instance" and data.get("instance_type") == "Nmos"
     ]
     pmos_transistors = [
         node
         for node, data in graph.nodes(data=True)
-        if data.get("node_kind") == "component_instance"
-        and data.get("instance_type") == "Pmos"
+        if data.get("node_kind") == "component_instance" and data.get("instance_type") == "Pmos"
     ]
     return nmos_transistors, pmos_transistors
 
@@ -194,18 +192,11 @@ def _generate_transistor_models(transistors, graph, dsu, model_type):
     """Generates small signal models and rule annotations for a list of transistors."""
     model_statements = []
     rule_annotations = []
-    generator_func = (
-        generate_nmos_small_signal_model
-        if model_type == "Nmos"
-        else generate_pmos_small_signal_model
-    )
+    generator_func = generate_nmos_small_signal_model if model_type == "Nmos" else generate_pmos_small_signal_model
 
     for transistor_name in transistors:
         term_to_canonical, _ = get_component_connectivity(graph, transistor_name)
-        external_nets = {
-            term: get_preferred_net_name_for_reconstruction(net, dsu)
-            for term, net in term_to_canonical.items()
-        }
+        external_nets = {term: get_preferred_net_name_for_reconstruction(net, dsu) for term, net in term_to_canonical.items()}
 
         generated_statements, rule_data = generator_func(transistor_name, external_nets)
         model_statements.extend(generated_statements)
@@ -219,9 +210,7 @@ def _generate_transistor_models(transistors, graph, dsu, model_type):
     return model_statements, rule_annotations
 
 
-def _write_output_files(
-    input_file, output_dir, all_model_statements, rule_annotations, stdout
-):
+def _write_output_files(input_file, output_dir, all_model_statements, rule_annotations, stdout):
     """Writes the generated model and annotation rules to files or stdout."""
     from circuijt.ast_utils import generate_proto_from_ast  # Local import
 
@@ -253,9 +242,7 @@ def _write_output_files(
         print(f"Transformation rules saved to {annotation_file_path}")
 
 
-def process_circuit_file(
-    input_file, output_dir=None, stdout=False, debug_dump=False
-):  # Added debug_dump
+def process_circuit_file(input_file, output_dir=None, stdout=False, debug_dump=False):  # Added debug_dump
     """Process a circuit file and generate small signal models."""
     ast, errors = _parse_circuit_file(input_file, debug_dump)
     if not ast:
@@ -281,34 +268,24 @@ def process_circuit_file(
     all_rule_annotations = []
 
     if nmos_transistors:
-        nmos_models, nmos_rules = _generate_transistor_models(
-            nmos_transistors, graph, dsu, "Nmos"
-        )
+        nmos_models, nmos_rules = _generate_transistor_models(nmos_transistors, graph, dsu, "Nmos")
         all_model_statements.extend(nmos_models)
         all_rule_annotations.extend(nmos_rules)
 
     if pmos_transistors:
-        pmos_models, pmos_rules = _generate_transistor_models(
-            pmos_transistors, graph, dsu, "Pmos"
-        )
+        pmos_models, pmos_rules = _generate_transistor_models(pmos_transistors, graph, dsu, "Pmos")
         all_model_statements.extend(pmos_models)
         all_rule_annotations.extend(pmos_rules)
 
     if debug_dump:
-        print(
-            "\n--- DEBUG DUMP: Generated Small-Signal Model AST (all_model_statements) ---"
-        )
+        print("\n--- DEBUG DUMP: Generated Small-Signal Model AST (all_model_statements) ---")
         pprint.pprint(all_model_statements)
 
-    _write_output_files(
-        input_file, output_dir, all_model_statements, all_rule_annotations, stdout
-    )
+    _write_output_files(input_file, output_dir, all_model_statements, all_rule_annotations, stdout)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate small signal models from circuit files"
-    )
+    parser = argparse.ArgumentParser(description="Generate small signal models from circuit files")
     parser.add_argument("circuit_file", help="Input circuit file to process")
     parser.add_argument(
         "-o",
@@ -329,9 +306,7 @@ def main():
     )
 
     args = parser.parse_args()
-    process_circuit_file(
-        args.circuit_file, args.output_dir, args.stdout, args.debug_dump
-    )  # Pass debug_dump
+    process_circuit_file(args.circuit_file, args.output_dir, args.stdout, args.debug_dump)  # Pass debug_dump
 
 
 if __name__ == "__main__":

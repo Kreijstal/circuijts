@@ -16,7 +16,7 @@ dependencies = [
 requires = ["hatchling", "pytest-cov"]
 build-backend = "hatchling.build"
 
-it[tool.hatch.build.targets.wheel]
+[tool.hatch.build.targets.wheel]
 packages = ["circuijt"]
 
 [tool.pytest.ini_options]

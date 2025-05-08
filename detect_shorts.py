@@ -17,9 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "."))
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Detect topological short circuits in .circuijt files."
-    )
+    parser = argparse.ArgumentParser(description="Detect topological short circuits in .circuijt files.")
     parser.add_argument("circuit_file", help="Input .circuijt file to process")
     parser.add_argument(
         "--debug-dump",
@@ -56,9 +54,7 @@ def read_and_parse_circuit(args):
             print(f"  {error}")
 
     if not ast and parser_errors:
-        print(
-            "Critical parsing errors prevented AST generation. Cannot perform analysis."
-        )
+        print("Critical parsing errors prevented AST generation. Cannot perform analysis.")
         sys.exit(1)
     if not ast and not parser_errors:
         print(f"No circuit statements found in '{args.circuit_file}'.")
@@ -73,9 +69,7 @@ def validate_circuit(ast, args):
         print(f"\nStandard validation errors found in '{args.circuit_file}':")
         for error in validation_errors:
             print(f"  {error}")
-        print(
-            "Proceeding with short circuit detection despite these validation errors..."
-        )
+        print("Proceeding with short circuit detection despite these validation errors...")
 
 
 def convert_to_graph(ast, args):
@@ -83,9 +77,7 @@ def convert_to_graph(ast, args):
         graph, dsu = ast_to_graph(ast)
     except Exception as e:
         print(f"\nError during graph construction for '{args.circuit_file}': {e}")
-        print(
-            "This may be due to severe issues in the circuit description not caught by the parser."
-        )
+        print("This may be due to severe issues in the circuit description not caught by the parser.")
         if args.debug_dump:
             print("\n--- DEBUG DUMP: AST before failing ast_to_graph call ---")
             pprint.pprint(ast)

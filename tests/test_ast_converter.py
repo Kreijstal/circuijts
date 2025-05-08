@@ -30,12 +30,8 @@ def test_simple_series_flattening():
     r1_pins = [p for p in pins if p["component_instance"] == "R1"]
     assert len(r1_pins) == 2
     r1_nets = {p["net"] for p in r1_pins}
-    assert "in" in r1_nets or any(
-        s["canonical_net"] == "in" for s in flattened if s["type"] == "net_alias"
-    )
-    assert "mid" in r1_nets or any(
-        s["canonical_net"] == "mid" for s in flattened if s["type"] == "net_alias"
-    )
+    assert "in" in r1_nets or any(s["canonical_net"] == "in" for s in flattened if s["type"] == "net_alias")
+    assert "mid" in r1_nets or any(s["canonical_net"] == "mid" for s in flattened if s["type"] == "net_alias")
 
 
 def test_net_alias_preservation():
@@ -96,9 +92,7 @@ def test_roundtrip_conversion():
             if stmt["type"] == "series_connection":
                 print(f"Path elements: {stmt['path']}")
 
-    assert (
-        parallel_found
-    ), "Parallel structure (R1 || C1) not preserved in reconstruction"
+    assert parallel_found, "Parallel structure (R1 || C1) not preserved in reconstruction"
 
 
 def _debug_print_flattened(flattened):
@@ -130,9 +124,7 @@ def _debug_print_reconstructed(reconstructed):
                 elif el["type"] == "component":
                     path_desc.append(el["name"])
                 elif el["type"] == "parallel_block":
-                    components = [
-                        e["name"] for e in el["elements"] if e["type"] == "component"
-                    ]
+                    components = [e["name"] for e in el["elements"] if e["type"] == "component"]
                     path_desc.append(f"[{' || '.join(components)}]")
             print(f"  Series path: {' -- '.join(path_desc)}")
 
@@ -143,9 +135,7 @@ def _check_parallel_structure(reconstructed):
         if stmt["type"] == "series_connection":
             for el in stmt["path"]:
                 if el["type"] == "parallel_block":
-                    components = {
-                        e["name"] for e in el["elements"] if e["type"] == "component"
-                    }
+                    components = {e["name"] for e in el["elements"] if e["type"] == "component"}
                     if components == {"R1", "C1"}:
                         return True
     return False
@@ -176,23 +166,15 @@ def test_internal_components_handling():
     flattened = ast_to_flattened_ast(statements, dsu)
 
     # Check voltage source connections are preserved
-    v1_pins = [
-        p
-        for p in flattened
-        if p["type"] == "pin_connection" and p["component_instance"] == "V1"
-    ]
+    v1_pins = [p for p in flattened if p["type"] == "pin_connection" and p["component_instance"] == "V1"]
 
     print("\nVoltage source connections:")
     for pin in v1_pins:
         print(f"  {pin['component_instance']}.{pin['terminal']} -> {pin['net']}")
 
     assert len(v1_pins) == 2, "Expected 2 pin connections for V1"
-    assert any(
-        p["terminal"] == "neg" for p in v1_pins
-    ), "V1 should have neg terminal connected"
-    assert any(
-        p["terminal"] == "pos" for p in v1_pins
-    ), "V1 should have pos terminal connected"
+    assert any(p["terminal"] == "neg" for p in v1_pins), "V1 should have neg terminal connected"
+    assert any(p["terminal"] == "pos" for p in v1_pins), "V1 should have pos terminal connected"
 
 
 def test_terminal_preservation():
@@ -214,11 +196,7 @@ def test_terminal_preservation():
     flattened = ast_to_flattened_ast(statements, dsu)
 
     # Check all MOSFET terminals preserved
-    m1_pins = [
-        p
-        for p in flattened
-        if p["type"] == "pin_connection" and p["component_instance"] == "M1"
-    ]
+    m1_pins = [p for p in flattened if p["type"] == "pin_connection" and p["component_instance"] == "M1"]
 
     print("\nMOSFET terminal connections:")
     for pin in m1_pins:
@@ -232,13 +210,9 @@ def test_terminal_preservation():
 
     # Allow for either the original net name or its canonical equivalent via DSU
     assert pin_nets["G"] == "in" or any(
-        a["canonical_net"] == "in"
-        for a in flattened
-        if a["type"] == "net_alias" and a["source_net"] == pin_nets["G"]
+        a["canonical_net"] == "in" for a in flattened if a["type"] == "net_alias" and a["source_net"] == pin_nets["G"]
     )
-    assert (
-        pin_nets["S"] == "GND"
-    ), f"Source should connect to GND, found: {pin_nets['S']}"
+    assert pin_nets["S"] == "GND", f"Source should connect to GND, found: {pin_nets['S']}"
     assert pin_nets["B"] == "GND", f"Bulk should connect to GND, found: {pin_nets['B']}"
 
 
@@ -268,47 +242,25 @@ def test_complex_series_parallel_flattening():
 
         # Assert
         # 1. Verify all original components are present
-        original_components = {
-            stmt["instance_name"] for stmt in ast if stmt["type"] == "declaration"
-        }
-        flattened_components = {
-            stmt["instance_name"]
-            for stmt in flattened_ast
-            if stmt["type"] == "declaration"
-        }
+        original_components = {stmt["instance_name"] for stmt in ast if stmt["type"] == "declaration"}
+        flattened_components = {stmt["instance_name"] for stmt in flattened_ast if stmt["type"] == "declaration"}
         assert original_components == flattened_components
 
         # 2. Verify connection count matches expected topology
-        original_connections = sum(
-            1 for stmt in ast if stmt["type"] in ("connection", "series", "parallel")
-        )
-        flattened_connections = sum(
-            1 for stmt in flattened_ast if stmt["type"] == "pin_connection"
-        )
+        original_connections = sum(1 for stmt in ast if stmt["type"] in ("connection", "series", "parallel"))
+        flattened_connections = sum(1 for stmt in flattened_ast if stmt["type"] == "pin_connection")
         assert flattened_connections >= original_connections
 
         # 3. Verify no duplicate pin connections
         pin_connections = {
-            (stmt["component_instance"], stmt["terminal"])
-            for stmt in flattened_ast
-            if stmt["type"] == "pin_connection"
+            (stmt["component_instance"], stmt["terminal"]) for stmt in flattened_ast if stmt["type"] == "pin_connection"
         }
-        assert len(pin_connections) == sum(
-            1 for stmt in flattened_ast if stmt["type"] == "pin_connection"
-        )
+        assert len(pin_connections) == sum(1 for stmt in flattened_ast if stmt["type"] == "pin_connection")
 
         # 4. Verify net aliases are properly handled
-        net_aliases = {
-            stmt["source_net"]: stmt["canonical_net"]
-            for stmt in flattened_ast
-            if stmt["type"] == "net_alias"
-        }
+        net_aliases = {stmt["source_net"]: stmt["canonical_net"] for stmt in flattened_ast if stmt["type"] == "net_alias"}
         for source, canonical in net_aliases.items():
-            assert canonical in {
-                stmt["net"]
-                for stmt in flattened_ast
-                if stmt["type"] == "pin_connection"
-            }
+            assert canonical in {stmt["net"] for stmt in flattened_ast if stmt["type"] == "pin_connection"}
 
     except Exception as e:
         # Debug info on failure

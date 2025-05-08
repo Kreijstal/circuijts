@@ -44,9 +44,7 @@ def test_nmos_reconstruction_maintains_arity(nmos_full_connection_circuit):
     # Optional: Validate AST_1 (should pass)
     validator_1 = CircuitValidator(ast_1)
     validation_errors_1, _ = validator_1.validate()
-    assert (
-        not validation_errors_1
-    ), f"Validation errors in initial AST_1: {validation_errors_1}"
+    assert not validation_errors_1, f"Validation errors in initial AST_1: {validation_errors_1}"
     print("Initial AST_1 validation successful.")
 
     # 2. Convert AST_1 to Graph_1
@@ -77,27 +75,20 @@ def test_nmos_reconstruction_maintains_arity(nmos_full_connection_circuit):
         not validation_errors_2
     ), f"Validation errors found in reconstructed AST_2, indicating potential arity/connection issues: {validation_errors_2}"
 
-    print(
-        "Reconstructed AST_2 validation successful (arity and connections preserved for M1)."
-    )
+    print("Reconstructed AST_2 validation successful (arity and connections preserved for M1).")
 
     # 5. Check specifically that M1 was reconstructed as a component_connection_block
     #    and has 4 connections.
     m1_block_found = False
     m1_connections_count = 0
     for stmt in ast_2:
-        if (
-            stmt.get("type") == "component_connection_block"
-            and stmt.get("component_name") == "M1"
-        ):
+        if stmt.get("type") == "component_connection_block" and stmt.get("component_name") == "M1":
             m1_block_found = True
             m1_connections_count = len(stmt.get("connections", []))
             print(f"Found M1 connection block in AST_2: {stmt}")
             break
 
-    assert (
-        m1_block_found
-    ), "M1 was not reconstructed as a component_connection_block in AST_2."
+    assert m1_block_found, "M1 was not reconstructed as a component_connection_block in AST_2."
     assert (
         m1_connections_count == 4
     ), f"M1 in reconstructed AST_2 does not have 4 connections in its block. Found {m1_connections_count}."

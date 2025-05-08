@@ -41,9 +41,7 @@ def _flatten_series_path(path_elements, context):
         "node": lambda e: {"type": "node", "name": e["name"]},
     }
 
-    return [
-        type_handlers[e["type"]](e) for e in path_elements if e["type"] in type_handlers
-    ]
+    return [type_handlers[e["type"]](e) for e in path_elements if e["type"] in type_handlers]
 
 
 def _find_adjacent_nodes(path, index):
@@ -177,9 +175,7 @@ def _process_series_connection(statement, dsu, element_processors):
                     )
             elif element["type"] in element_processors:
                 prev_node, next_node = _find_adjacent_nodes(statement["path"], i)
-                flattened.extend(
-                    element_processors[element["type"]](element, prev_node, next_node)
-                )
+                flattened.extend(element_processors[element["type"]](element, prev_node, next_node))
     return flattened
 
 
@@ -210,9 +206,7 @@ def ast_to_flattened_ast(ast, dsu=None):
     statement_processors = {
         "declaration": _process_declaration,
         "component_connection_block": _process_component_connection_block,
-        "series_connection": lambda s: _process_series_connection(
-            s, dsu, element_processors
-        ),
+        "series_connection": lambda s: _process_series_connection(s, dsu, element_processors),
         "direct_assignment": lambda s: _process_direct_assignment(s, dsu),
     }
 
@@ -272,10 +266,7 @@ def _find_net_pairs(pin_connections):
     net_pairs = set()
     for pin in pin_connections:
         for other_pin in pin_connections:
-            if (
-                pin["component_instance"] == other_pin["component_instance"]
-                and pin["terminal"] != other_pin["terminal"]
-            ):
+            if pin["component_instance"] == other_pin["component_instance"] and pin["terminal"] != other_pin["terminal"]:
                 net_pairs.add(tuple(sorted((pin["net"], other_pin["net"]))))
     return net_pairs
 
@@ -289,9 +280,7 @@ def _build_ast_path(net1, net2, components, node_components, pin_connections):
                 {"type": "node", "name": net1},
                 {
                     "type": "parallel_block",
-                    "elements": [
-                        {"type": "component", "name": comp} for comp in components
-                    ],
+                    "elements": [{"type": "component", "name": comp} for comp in components],
                 },
                 {"type": "node", "name": net2},
             ],
@@ -327,9 +316,7 @@ def flattened_ast_to_regular_ast(flattened_ast):
     pin_connections = [s for s in flattened_ast if s["type"] == "pin_connection"]
     node_components = {}
     for pin in pin_connections:
-        node_components.setdefault(pin["net"], []).append(
-            (pin["component_instance"], pin["terminal"])
-        )
+        node_components.setdefault(pin["net"], []).append((pin["component_instance"], pin["terminal"]))
 
     # Process net pairs
     net_pairs = _find_net_pairs(pin_connections)
@@ -337,16 +324,10 @@ def flattened_ast_to_regular_ast(flattened_ast):
         components = [
             comp
             for comp, term in node_components.get(net1, [])
-            if any(
-                p["component_instance"] == comp and p["net"] == net2
-                for p in pin_connections
-                if p["terminal"] != term
-            )
+            if any(p["component_instance"] == comp and p["net"] == net2 for p in pin_connections if p["terminal"] != term)
         ]
 
-        if path := _build_ast_path(
-            net1, net2, components, node_components, pin_connections
-        ):
+        if path := _build_ast_path(net1, net2, components, node_components, pin_connections):
             regular_ast.append(path)
 
     return regular_ast
