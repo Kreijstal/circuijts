@@ -36,10 +36,10 @@ class DSU:
         self.parent[item] = self.find(self.parent[item])  # Path compression
         return self.parent[item]
 
-    def union(self, item1, item2):
-        """Merges the sets containing item1 and item2, preferring special net names as canonical."""
-        root1 = self.find(item1)
-        root2 = self.find(item2)
+    def union(self, u_name, v_name, connection_type, connection_detail):
+        """Merges the sets containing u_name and v_name, preferring special net names as canonical."""
+        root1 = self.find(u_name)
+        root2 = self.find(v_name)
 
         if root1 != root2:
             is_root1_preferred = root1 in self.preferred_roots
@@ -48,9 +48,11 @@ class DSU:
             if is_root1_preferred and not is_root2_preferred:
                 # root1 is preferred, root2 is not; root1 becomes the new representative
                 self.parent[root2] = root1
+                return True, True
             elif not is_root1_preferred and is_root2_preferred:
                 # root2 is preferred, root1 is not; root2 becomes the new representative
                 self.parent[root1] = root2
+                return True, True
             elif is_root1_preferred and is_root2_preferred:
                 # Both are preferred. Use the defined order to break ties.
                 try:
@@ -64,21 +66,36 @@ class DSU:
 
                 if idx1 < idx2:  # root1 has higher preference
                     self.parent[root2] = root1
+                    return True, True
                 elif idx2 < idx1:  # root2 has higher preference
                     self.parent[root1] = root2
+                    return True, True
                 else:  # Same preference or both not in ordered list (but are in self.preferred_roots)
                     # Fallback to alphabetical or let root2 win for determinism
                     if root1 < root2:  # Arbitrary but deterministic tie-break
                         self.parent[root2] = root1
                     else:
                         self.parent[root1] = root2
+                    return True, True
             else:
                 # Neither is preferred; let root2's original root become the representative (original behavior)
                 self.parent[root1] = root2
+                return True, False
 
-            self.num_sets -= 1
-            return True
-        return False
+        return False, False  # Not a valid connection for DSU processing
+
+    def find_set_details(self, node_name):
+        """Find the set details for a given node name."""
+        root = self.find(node_name)
+        return {
+            "root": root,
+            "is_preferred": root in self.preferred_roots,
+            "preference_index": (
+                self.preferred_root_order.index(root)
+                if root in self.preferred_root_order
+                else float("inf")
+            ),
+        }
 
     def get_all_canonical_representatives(self):
         """Returns a set of all canonical representatives."""
@@ -136,7 +153,12 @@ def _handle_component_connection(G, stmt, declared_components, electrical_nets_d
         explicit_net_name = conn["node"]
         device_terminal = f"{comp_name}.{terminal_name}"
 
-        electrical_nets_dsu.union(device_terminal, explicit_net_name)
+        electrical_nets_dsu.union(
+            device_terminal,
+            explicit_net_name,
+            "component_connection",
+            {"terminal": terminal_name, "net": explicit_net_name},
+        )
         canonical_net = electrical_nets_dsu.find(explicit_net_name)
         if not G.has_node(canonical_net):
             G.add_node(canonical_net, node_kind="electrical_net")
@@ -151,7 +173,9 @@ def _handle_component_connection(G, stmt, declared_components, electrical_nets_d
 def _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu):
     """Handle direct assignment statements."""
     s_node, t_node = stmt["source_node"], stmt["target_node"]
-    electrical_nets_dsu.union(s_node, t_node)
+    electrical_nets_dsu.union(
+        s_node, t_node, "direct_assignment", {"source": s_node, "target": t_node}
+    )
     canonical_net = electrical_nets_dsu.find(s_node)
     if not G.has_node(canonical_net):
         G.add_node(canonical_net, node_kind="electrical_net")
