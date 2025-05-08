@@ -10,6 +10,7 @@ from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
 
 @pytest.fixture
 def test_circuit_description():
+    """Provides a sample circuit description string for testing."""
     return """
 ; Test Circuit for Proto-Language Parser and Validator
 
@@ -45,6 +46,7 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 
 @pytest.fixture
 def invalid_circuit_description():
+    """Provides an invalid circuit description string for testing."""
     return """
 ; Test Circuit for Proto-Language Parser and Validator with invalid R2 connections
 
@@ -80,6 +82,7 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 
 @pytest.fixture
 def valid_circuit_description():
+    """Provides a valid circuit description string for testing."""
     return """
 ; Test Circuit for Proto-Language Parser and Validator (Valid Circuit)
 
@@ -108,6 +111,7 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 
 @pytest.fixture
 def parsed_statements(test_circuit_description):
+    """Parses the test_circuit_description and returns AST statements."""
     parser = ProtoCircuitParser()
     statements, errors = parser.parse_text(test_circuit_description)
     assert not errors, f"Parser errors found: {errors}"
@@ -115,7 +119,9 @@ def parsed_statements(test_circuit_description):
 
 
 @pytest.fixture
+# TODO: Ask: why we assert not errors here?
 def invalid_parsed_statements(invalid_circuit_description):
+    """Parses the invalid_circuit_description and returns AST statements."""
     parser = ProtoCircuitParser()
     statements, errors = parser.parse_text(invalid_circuit_description)
     assert not errors, f"Parser errors found: {errors}"
@@ -124,6 +130,7 @@ def invalid_parsed_statements(invalid_circuit_description):
 
 @pytest.fixture
 def valid_parsed_statements(valid_circuit_description):
+    """Parses the valid_circuit_description and returns AST statements."""
     parser = ProtoCircuitParser()
     statements, errors = parser.parse_text(valid_circuit_description)
     assert not errors, f"Parser errors found: {errors}"
@@ -131,13 +138,15 @@ def valid_parsed_statements(valid_circuit_description):
 
 
 def test_parser(test_circuit_description):
+    """Test the circuit parser with a sample circuit description."""
     parser = ProtoCircuitParser()
-    parsed_statements, parser_errors = parser.parse_text(test_circuit_description)
+    parsed_stmts, parser_errors = parser.parse_text(test_circuit_description)
     assert not parser_errors, f"Parser errors found: {parser_errors}"
-    assert len(parsed_statements) > 0, "No statements were parsed"
+    assert len(parsed_stmts) > 0, "No statements were parsed"
 
 
 def test_invalid_circuit_validator(invalid_parsed_statements):
+    """Test the circuit validator with an invalid circuit (R2 arity error)."""
     print("\n--- Testing Invalid Circuit Validator ---")
     validator = CircuitValidator(invalid_parsed_statements)
     validation_errors, debug_info = validator.validate()
@@ -168,6 +177,7 @@ def test_invalid_circuit_validator(invalid_parsed_statements):
 
 
 def test_valid_circuit_validator(valid_parsed_statements):
+    """Test the circuit validator with a valid circuit description."""
     print("\n--- Testing Valid Circuit Validator ---")
     validator = CircuitValidator(valid_parsed_statements)
     validation_errors, debug_info = validator.validate()
@@ -199,6 +209,7 @@ def test_valid_circuit_validator(valid_parsed_statements):
 
 
 def test_ast_utils(parsed_statements):
+    """Test AST utility functions like summarize_circuit_elements and generate_proto_from_ast."""
     summary = summarize_circuit_elements(parsed_statements)
     assert summary["num_total_nodes"] > 0, "No nodes found in circuit"
     assert summary["total_components"] > 0, "No components found in circuit"
@@ -209,6 +220,7 @@ def test_ast_utils(parsed_statements):
 
 
 def test_graph_utils(parsed_statements):
+    """Test graph utility functions like ast_to_graph and graph_to_structured_ast."""
     graph, dsu = ast_to_graph(parsed_statements)
     assert len(graph.nodes()) > 0, "No nodes in generated graph"
     assert len(graph.edges()) > 0, "No edges in generated graph"

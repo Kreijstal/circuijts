@@ -10,6 +10,7 @@ from circuijt.parser import ProtoCircuitParser
 
 
 def test_declaration_ast():
+    """Test AST structure for component declarations."""
     parser = ProtoCircuitParser()
     code = """
     R R1
@@ -34,6 +35,7 @@ def test_declaration_ast():
 
 
 def test_series_connection_ast():
+    """Test AST structure for series connections."""
     parser = ProtoCircuitParser()
     code = "(input) -- R1 -- V1(-+) -- (output)"
     statements, errors = parser.parse_text(code)
@@ -59,6 +61,7 @@ def test_series_connection_ast():
 
 
 def test_parallel_block_ast():
+    """Test AST structure for parallel blocks."""
     parser = ProtoCircuitParser()
     code = "(out) -- [ R1 || C1 || gm*v1 (->) ] -- (gnd)"
     statements, errors = parser.parse_text(code)
@@ -90,6 +93,7 @@ def test_parallel_block_ast():
 
 
 def test_connection_block_ast():
+    """Test AST structure for component connection blocks."""
     parser = ProtoCircuitParser()
     code = "M1 { G:(in), S:(gnd), D:(out), B:(gnd) }"
     statements, errors = parser.parse_text(code)
@@ -111,6 +115,7 @@ def test_connection_block_ast():
 
 
 def test_direct_assignment_ast():
+    """Test AST structure for direct node assignments."""
     parser = ProtoCircuitParser()
     code = "(node1):(node2)"
     statements, errors = parser.parse_text(code)
@@ -123,6 +128,7 @@ def test_direct_assignment_ast():
 
 
 def test_named_current_ast():
+    """Test AST structure for named currents in series connections."""
     parser = ProtoCircuitParser()
     code = "(VDD) -- ->I_supply -- R1 -- (out)"
     statements, errors = parser.parse_text(code)
@@ -139,6 +145,7 @@ def test_named_current_ast():
 
 
 def test_complete_circuit_ast():
+    """Test AST structure for a complete circuit with various elements."""
     parser = ProtoCircuitParser()
     code = """
     ; Declarations
