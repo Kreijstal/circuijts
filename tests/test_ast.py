@@ -149,10 +149,9 @@ def test_complete_circuit_ast():
 
     ; Device connections
     M1 { S:(GND), B:(GND) }
-    
+
     ; Input path
     (GND) -- V_in(-+) -- (M1.G)
-    
     ; Output path with parallel load
     (M1.D) -- [ R_load || C_bypass ] -- (GND)
     """

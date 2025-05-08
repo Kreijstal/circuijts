@@ -56,7 +56,9 @@ def read_and_parse_circuit(args):
             print(f"  {error}")
 
     if not ast and parser_errors:
-        print("Critical parsing errors prevented AST generation. Cannot perform analysis.")
+        print(
+            "Critical parsing errors prevented AST generation. Cannot perform analysis."
+        )
         sys.exit(1)
     if not ast and not parser_errors:
         print(f"No circuit statements found in '{args.circuit_file}'.")
@@ -71,7 +73,9 @@ def validate_circuit(ast, args):
         print(f"\nStandard validation errors found in '{args.circuit_file}':")
         for error in validation_errors:
             print(f"  {error}")
-        print("Proceeding with short circuit detection despite these validation errors...")
+        print(
+            "Proceeding with short circuit detection despite these validation errors..."
+        )
 
 
 def convert_to_graph(ast, args):
@@ -79,7 +83,9 @@ def convert_to_graph(ast, args):
         graph, dsu = ast_to_graph(ast)
     except Exception as e:
         print(f"\nError during graph construction for '{args.circuit_file}': {e}")
-        print("This may be due to severe issues in the circuit description not caught by the parser.")
+        print(
+            "This may be due to severe issues in the circuit description not caught by the parser."
+        )
         if args.debug_dump:
             print("\n--- DEBUG DUMP: AST before failing ast_to_graph call ---")
             pprint.pprint(ast)
@@ -112,7 +118,6 @@ def main():
         graph, dsu = convert_to_graph(ast, args)
         detect_and_report_shorts(graph, dsu, args)
 
+
 if __name__ == "__main__":
     main()
-
-

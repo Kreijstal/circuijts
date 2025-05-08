@@ -7,14 +7,30 @@ def summarize_circuit_elements(parsed_statements):
     declared_component_instances = set()  # Store names of declared components
     implicit_nodes_generated = set()
     implicit_node_counter = 0
+    component_counts = {
+        "total_nmos": 0,
+        "total_resistors": 0,
+        "total_capacitors": 0,
+        "total_voltages": 0,
+        "total_parallel_blocks": 0
+    }
 
     for stmt in parsed_statements:
         stmt_type = stmt.get("type")
 
         if stmt_type == "declaration":
             inst_name = stmt.get("instance_name")
+            comp_type = stmt.get("component_type")
             if inst_name:  # Parser ensures format, validator checks for duplicates/type
                 declared_component_instances.add(inst_name)
+                if comp_type == "Nmos":
+                    component_counts["total_nmos"] += 1
+                elif comp_type == "R":
+                    component_counts["total_resistors"] += 1
+                elif comp_type == "C":
+                    component_counts["total_capacitors"] += 1
+                elif comp_type == "V":
+                    component_counts["total_voltages"] += 1
 
         elif stmt_type == "component_connection_block":
             comp_name = stmt.get("component_name")  # Assumed declared by validator
@@ -81,19 +97,22 @@ def summarize_circuit_elements(parsed_statements):
                         f"_implicit_node_{implicit_node_counter}"
                     )
 
+            for el in stmt.get("path", []):
+                if el.get("type") == "parallel_block":
+                    component_counts["total_parallel_blocks"] += 1
+
     all_nodes_combined = explicit_nodes.union(implicit_nodes_generated)
 
     return {
         "num_total_nodes": len(all_nodes_combined),
         "node_list": sorted(list(all_nodes_combined)),
-        "num_total_components": len(declared_component_instances),
-        "component_list": sorted(
-            list(declared_component_instances)
-        ),  # These are from declarations
+        "total_components": len(declared_component_instances),  # Changed from num_total_components
+        "component_list": sorted(list(declared_component_instances)),
         "details": {
             "explicit_nodes": sorted(list(explicit_nodes)),
             "implicit_nodes": sorted(list(implicit_nodes_generated)),
         },
+        **component_counts
     }
 
 
@@ -192,3 +211,42 @@ def generate_proto_from_ast(parsed_statements):
             output_lines.append(line_str)
 
     return "\n".join(output_lines)
+
+
+def find_statements_of_type(statements, statement_type):
+    """Find all statements of a specific type in the AST.
+
+    Args:
+        statements (list): List of AST statement dictionaries
+        statement_type (str): Type of statement to find
+
+    Returns:
+        list: List of matching statements
+    """
+    matches = []
+    for stmt in statements:
+        if stmt.get("type") == statement_type:
+            matches.append(stmt)
+        # Check for nested statements in series connections
+        elif stmt.get("type") == "series_connection":
+            for path_element in stmt.get("path", []):
+                if path_element.get("type") == statement_type:
+                    matches.append(path_element)
+    return matches
+
+
+def find_declarations_by_type(statements, component_type):
+    """Find all component declarations of a specific type.
+
+    Args:
+        statements (list): List of AST statement dictionaries
+        component_type (str): Type of component to find declarations for
+
+    Returns:
+        list: List of matching declaration statements
+    """
+    return [
+        stmt
+        for stmt in statements
+        if stmt.get("type") == "declaration" and stmt.get("component_type") == component_type
+    ]

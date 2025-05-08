@@ -4,55 +4,46 @@
 from .graph_utils import DSU
 
 
+def _process_parallel_elements(elements):
+    """Process elements within a parallel block."""
+    processed = []
+    for element in elements:
+        if element["type"] == "component":
+            processed.append({"type": "component_instance", "name": element["name"]})
+        elif element["type"] in ("controlled_source", "noise_source"):
+            processed.append(
+                {
+                    "type": element["type"],
+                    **{k: element[k] for k in element if k != "type"},
+                }
+            )
+    return processed
+
+
 def _flatten_series_path(path_elements, context):
     """Helper function to flatten series path elements."""
-    flattened = []
-    for element in path_elements:
-        if element["type"] == "parallel_block":
-            parallel_elements = []
-            for parallel_element in element["elements"]:
-                if parallel_element["type"] == "component":
-                    parallel_elements.append(
-                        {"type": "component_instance", "name": parallel_element["name"]}
-                    )
-                elif parallel_element["type"] == "controlled_source":
-                    parallel_elements.append(
-                        {
-                            "type": "controlled_source",
-                            "expression": parallel_element["expression"],
-                            "direction": parallel_element["direction"],
-                        }
-                    )
-                elif parallel_element["type"] == "noise_source":
-                    parallel_elements.append(
-                        {
-                            "type": "noise_source",
-                            "id": parallel_element["id"],
-                            "direction": parallel_element["direction"],
-                        }
-                    )
-            flattened.append({"type": "parallel_block", "elements": parallel_elements})
-        elif element["type"] == "component":
-            flattened.append({"type": "component_instance", "name": element["name"]})
-        elif element["type"] == "source":
-            flattened.append(
-                {
-                    "type": "voltage_source",
-                    "name": element["name"],
-                    "polarity": element["polarity"],
-                }
-            )
-        elif element["type"] == "named_current":
-            flattened.append(
-                {
-                    "type": "named_current",
-                    "name": element["name"],
-                    "direction": element["direction"],
-                }
-            )
-        elif element["type"] == "node":
-            flattened.append({"type": "node", "name": element["name"]})
-    return flattened
+    type_handlers = {
+        "parallel_block": lambda e: {
+            "type": "parallel_block",
+            "elements": _process_parallel_elements(e["elements"]),
+        },
+        "component": lambda e: {"type": "component_instance", "name": e["name"]},
+        "source": lambda e: {
+            "type": "voltage_source",
+            "name": e["name"],
+            "polarity": e["polarity"],
+        },
+        "named_current": lambda e: {
+            "type": "named_current",
+            "name": e["name"],
+            "direction": e["direction"],
+        },
+        "node": lambda e: {"type": "node", "name": e["name"]},
+    }
+
+    return [
+        type_handlers[e["type"]](e) for e in path_elements if e["type"] in type_handlers
+    ]
 
 
 def ast_to_flattened_ast(ast, dsu=None):
