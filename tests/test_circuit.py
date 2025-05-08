@@ -45,6 +45,45 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 
 
 @pytest.fixture
+def circuit_description_with_semantic_errors():  # Renamed for clarity
+    """Provides a circuit description string that is syntactically valid
+    but contains semantic errors (e.g., 'invalid R2 connections').
+    This is intended to be parsed successfully by the parser but fail
+    during later validation by the CircuitValidator."""
+    return """
+; Test Circuit for Proto-Language Parser and Validator with invalid R2 connections
+
+; Declarations
+V Vs1          ; Voltage Source
+R R1           ; Resistor 1
+Nmos M1        ; NMOS Transistor
+R R2           ; Resistor 2
+C C1           ; Capacitor C1
+L L_test       ; Inductor for variety
+
+; Component Connection Block for M1 (NOW SINGLE LINE)
+M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
+
+; Series Connections
+(node_input) -- Vs1 (-+) -- R1 -- (node_gate)
+(node_drain) -- C1 -- (GND)
+
+; Parallel Block example
+(node_drain) -- [ R2 || C1 ] -- (GND)
+
+; Controlled Source in Parallel Block
+(node_drain) -- [ gm1*vgs1 (->) || R2 ] -- (GND)
+
+; Named Current
+(VDD) -- ->I_supply -- R2 -- (node_drain)
+
+; Direct Assignment (Node Aliasing)
+(Vout) : (node_drain)
+(AnotherNode) : (M1.S)
+"""
+
+
+@pytest.fixture
 def invalid_circuit_description():
     """Provides an invalid circuit description string for testing."""
     return """
@@ -119,11 +158,16 @@ def parsed_statements(test_circuit_description):
 
 
 @pytest.fixture
-# TODO: Ask: why we assert not errors here?
-def invalid_parsed_statements(invalid_circuit_description):
-    """Parses the invalid_circuit_description and returns AST statements."""
+# The assertion `assert not errors` is here because the input
+# 'circuit_description_with_semantic_errors' is expected to be syntactically valid
+# for the parser. The "invalidity" refers to semantic errors that should be
+# caught by the CircuitValidator, not by the ProtoCircuitParser.
+def invalid_parsed_statements(circuit_description_with_semantic_errors):  # Parameter name updated
+    """Parses the circuit_description_with_semantic_errors and returns AST statements.
+    It asserts that no parser (syntax) errors occur because the description
+    is expected to be syntactically correct, even if it's semantically flawed."""
     parser = ProtoCircuitParser()
-    statements, errors = parser.parse_text(invalid_circuit_description)
+    statements, errors = parser.parse_text(circuit_description_with_semantic_errors)
     assert not errors, f"Parser errors found: {errors}"
     return statements
 
