@@ -36,53 +36,51 @@ class DSU:
         self.parent[item] = self.find(self.parent[item])  # Path compression
         return self.parent[item]
 
+    def _resolve_preferred_union(self, root1, root2):
+        """Resolves union when both roots are preferred based on order and tie-breaking."""
+        try:
+            idx1 = self.preferred_root_order.index(root1)
+        except ValueError:
+            idx1 = float("inf")
+        try:
+            idx2 = self.preferred_root_order.index(root2)
+        except ValueError:
+            idx2 = float("inf")
+
+        if idx1 < idx2:
+            self.parent[root2] = root1
+        elif idx2 < idx1:
+            self.parent[root1] = root2
+        else:  # Same preference or both not in ordered list
+            if root1 < root2:  # Arbitrary but deterministic tie-break
+                self.parent[root2] = root1
+            else:
+                self.parent[root1] = root2
+        return True, True
+
     def union(self, u_name, v_name, connection_type, connection_detail):
         """Merges the sets containing u_name and v_name, preferring special net names as canonical."""
         root1 = self.find(u_name)
         root2 = self.find(v_name)
 
-        if root1 != root2:
-            is_root1_preferred = root1 in self.preferred_roots
-            is_root2_preferred = root2 in self.preferred_roots
+        if root1 == root2:
+            return False, False
 
-            if is_root1_preferred and not is_root2_preferred:
-                # root1 is preferred, root2 is not; root1 becomes the new representative
-                self.parent[root2] = root1
-                return True, True
-            elif not is_root1_preferred and is_root2_preferred:
-                # root2 is preferred, root1 is not; root2 becomes the new representative
-                self.parent[root1] = root2
-                return True, True
-            elif is_root1_preferred and is_root2_preferred:
-                # Both are preferred. Use the defined order to break ties.
-                try:
-                    idx1 = self.preferred_root_order.index(root1)
-                except ValueError:  # root1 is preferred but not in order list
-                    idx1 = float("inf")
-                try:
-                    idx2 = self.preferred_root_order.index(root2)
-                except ValueError:  # root2 is preferred but not in order list
-                    idx2 = float("inf")
+        is_root1_preferred = root1 in self.preferred_roots
+        is_root2_preferred = root2 in self.preferred_roots
 
-                if idx1 < idx2:  # root1 has higher preference
-                    self.parent[root2] = root1
-                    return True, True
-                elif idx2 < idx1:  # root2 has higher preference
-                    self.parent[root1] = root2
-                    return True, True
-                else:  # Same preference or both not in ordered list (but are in self.preferred_roots)
-                    # Fallback to alphabetical or let root2 win for determinism
-                    if root1 < root2:  # Arbitrary but deterministic tie-break
-                        self.parent[root2] = root1
-                    else:
-                        self.parent[root1] = root2
-                    return True, True
-            else:
-                # Neither is preferred; let root2's original root become the representative (original behavior)
-                self.parent[root1] = root2
-                return True, False
-
-        return False, False  # Not a valid connection for DSU processing
+        if is_root1_preferred and not is_root2_preferred:
+            self.parent[root2] = root1
+            return True, True
+        elif not is_root1_preferred and is_root2_preferred:
+            self.parent[root1] = root2
+            return True, True
+        elif is_root1_preferred and is_root2_preferred:
+            return self._resolve_preferred_union(root1, root2)
+        else:
+            # Neither is preferred; let root2's original root become the representative
+            self.parent[root1] = root2
+            return True, False
 
     def find_set_details(self, node_name):
         """Find the set details for a given node name."""
