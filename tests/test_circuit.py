@@ -7,6 +7,7 @@ from circuijt.validator import CircuitValidator
 from circuijt.ast_utils import summarize_circuit_elements, generate_proto_from_ast
 from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
 
+
 @pytest.fixture
 def test_circuit_description():
     return """
@@ -40,6 +41,7 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 (Vout) : (node_drain)
 (AnotherNode) : (M1.S)
 """
+
 
 @pytest.fixture
 def invalid_circuit_description():
@@ -75,6 +77,7 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 (AnotherNode) : (M1.S)
 """
 
+
 @pytest.fixture
 def valid_circuit_description():
     return """
@@ -102,12 +105,14 @@ M1 { G:(node_gate), S:(GND), D:(node_drain), B:(GND) }
 (Vout) : (node_drain)
 """
 
+
 @pytest.fixture
 def parsed_statements(test_circuit_description):
     parser = ProtoCircuitParser()
     statements, errors = parser.parse_text(test_circuit_description)
     assert not errors, f"Parser errors found: {errors}"
     return statements
+
 
 @pytest.fixture
 def invalid_parsed_statements(invalid_circuit_description):
@@ -116,6 +121,7 @@ def invalid_parsed_statements(invalid_circuit_description):
     assert not errors, f"Parser errors found: {errors}"
     return statements
 
+
 @pytest.fixture
 def valid_parsed_statements(valid_circuit_description):
     parser = ProtoCircuitParser()
@@ -123,84 +129,97 @@ def valid_parsed_statements(valid_circuit_description):
     assert not errors, f"Parser errors found: {errors}"
     return statements
 
+
 def test_parser(test_circuit_description):
     parser = ProtoCircuitParser()
     parsed_statements, parser_errors = parser.parse_text(test_circuit_description)
     assert not parser_errors, f"Parser errors found: {parser_errors}"
     assert len(parsed_statements) > 0, "No statements were parsed"
 
+
 def test_invalid_circuit_validator(invalid_parsed_statements):
     print("\n--- Testing Invalid Circuit Validator ---")
     validator = CircuitValidator(invalid_parsed_statements)
     validation_errors, debug_info = validator.validate()
-    
+
     # Expect validation error for R2 having too many connections
     assert validation_errors, "Expected validation errors but found none"
-    
+
     # Print debug info on failure
-    if not any("R2" in error and "arity" in error.lower() for error in validation_errors):
+    if not any(
+        "R2" in error and "arity" in error.lower() for error in validation_errors
+    ):
         print("\nDebug Information:")
-        if 'ast_validation' in debug_info:
+        if "ast_validation" in debug_info:
             print("\nAST Validation Details:")
-            for info in debug_info['ast_validation']:
+            for info in debug_info["ast_validation"]:
                 print(f"Total statements: {info['total_statements']}")
-                print(f"Declarations: {[d['instance_name'] for d in info['declarations']]}")
+                print(
+                    f"Declarations: {[d['instance_name'] for d in info['declarations']]}"
+                )
                 print(f"Component types: {info['components']}")
-                
-        if 'graph_construction' in debug_info:
+
+        if "graph_construction" in debug_info:
             print("\nGraph Construction Details:")
-            for info in debug_info['graph_construction']:
+            for info in debug_info["graph_construction"]:
                 print(f"Total nodes: {info['nodes']}")
                 print(f"Total edges: {info['edges']}")
                 print(f"Net nodes: {info['nets']}")
                 print(f"Component nodes: {info['components']}")
-                
-        raise AssertionError("Expected error about R2 having incorrect arity. Debug info above.")
+
+        raise AssertionError(
+            "Expected error about R2 having incorrect arity. Debug info above."
+        )
     print("Validation failed as expected with R2 arity error")
+
 
 def test_valid_circuit_validator(valid_parsed_statements):
     print("\n--- Testing Valid Circuit Validator ---")
     validator = CircuitValidator(valid_parsed_statements)
     validation_errors, debug_info = validator.validate()
-    
+
     # On failure, print debug info
     if validation_errors:
         print("\nUnexpected Validation Errors:")
         for error in validation_errors:
             print(f"  {error}")
-            
+
         print("\nDebug Information:")
-        if 'ast_validation' in debug_info:
+        if "ast_validation" in debug_info:
             print("\nAST Validation Details:")
-            for info in debug_info['ast_validation']:
+            for info in debug_info["ast_validation"]:
                 print(f"Total statements: {info['total_statements']}")
-                print(f"Declarations: {[d['instance_name'] for d in info['declarations']]}")
+                print(
+                    f"Declarations: {[d['instance_name'] for d in info['declarations']]}"
+                )
                 print(f"Component types: {info['components']}")
-                
-        if 'graph_construction' in debug_info:
+
+        if "graph_construction" in debug_info:
             print("\nGraph Construction Details:")
-            for info in debug_info['graph_construction']:
+            for info in debug_info["graph_construction"]:
                 print(f"Total nodes: {info['nodes']}")
                 print(f"Total edges: {info['edges']}")
                 print(f"Net nodes: {info['nets']}")
                 print(f"Component nodes: {info['components']}")
-                
+
         raise AssertionError("Unexpected validation errors found. Debug info above.")
     print("Valid circuit passed validation as expected")
 
+
 def test_ast_utils(parsed_statements):
     summary = summarize_circuit_elements(parsed_statements)
-    assert summary['num_total_nodes'] > 0, "No nodes found in circuit"
-    assert summary['num_total_components'] > 0, "No components found in circuit"
-    assert len(summary['details']['explicit_nodes']) > 0, "No explicit nodes found"
+    assert summary["num_total_nodes"] > 0, "No nodes found in circuit"
+    assert summary["num_total_components"] > 0, "No components found in circuit"
+    assert len(summary["details"]["explicit_nodes"]) > 0, "No explicit nodes found"
 
     reconstructed = generate_proto_from_ast(parsed_statements)
     assert reconstructed, "Failed to generate proto from AST"
+
 
 def test_graph_utils(parsed_statements):
     graph, dsu = ast_to_graph(parsed_statements)
     assert len(graph.nodes()) > 0, "No nodes in generated graph"
     assert len(graph.edges()) > 0, "No edges in generated graph"
-    
+
     reconstructed_ast = graph_to_structured_ast(graph, dsu)
     assert len(reconstructed_ast) > 0, "Failed to reconstruct AST from graph"

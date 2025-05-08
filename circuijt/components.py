@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Database of components and their properties."""
 
+
 class ComponentDatabase:
     """A database for storing component properties like arity."""
 
@@ -14,10 +15,21 @@ class ComponentDatabase:
             "Pmos": {"arity": 4, "terminals": ["G", "D", "S", "B"]},
             "V": {"arity": 2, "terminals": ["pos", "neg"]},
             "I": {"arity": 2, "terminals": ["pos", "neg"]},
-            "Opamp": {"arity": 3, "terminals": ["IN+", "IN-", "OUT"]}, # Basic, could be 5
+            "Opamp": {
+                "arity": 3,
+                "terminals": ["IN+", "IN-", "OUT"],
+            },  # Basic, could be 5
             # Behavioral / Internal types used by transformations or advanced features
-            "controlled_source": {"arity": 2, "behavioral": True, "terminals": ["par_t1", "par_t2"]},
-            "noise_source": {"arity": 2, "behavioral": True, "terminals": ["par_t1", "par_t2"]}
+            "controlled_source": {
+                "arity": 2,
+                "behavioral": True,
+                "terminals": ["par_t1", "par_t2"],
+            },
+            "noise_source": {
+                "arity": 2,
+                "behavioral": True,
+                "terminals": ["par_t1", "par_t2"],
+            },
         }
 
     def get_arity(self, component_type):
@@ -30,6 +42,7 @@ class ComponentDatabase:
             int: The arity of the component, or None if the component is not found.
         """
         return self.components.get(component_type, {}).get("arity")
+
 
 # Example usage
 if __name__ == "__main__":

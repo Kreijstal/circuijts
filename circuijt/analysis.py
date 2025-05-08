@@ -2,7 +2,10 @@
 Circuit analysis functions, including short circuit detection.
 """
 
-from .graph_utils import get_component_connectivity, get_preferred_net_name_for_reconstruction
+from .graph_utils import (
+    get_component_connectivity,
+    get_preferred_net_name_for_reconstruction,
+)
 
 
 def detect_short_circuits(graph, dsu):
@@ -25,8 +28,9 @@ def detect_short_circuits(graph, dsu):
 
     # 1. Check for components shorting their own terminals
     component_instance_nodes = [
-        n for n, data in graph.nodes(data=True)
-        if data.get('node_kind') == 'component_instance'
+        n
+        for n, data in graph.nodes(data=True)
+        if data.get("node_kind") == "component_instance"
     ]
 
     for comp_name in component_instance_nodes:
@@ -45,14 +49,18 @@ def detect_short_circuits(graph, dsu):
                 preferred_net_name = get_preferred_net_name_for_reconstruction(
                     canonical_net, dsu, allow_implicit_if_only_option=True
                 )
-                detected_shorts.append({
-                    'type': 'component_self_short',
-                    'component': comp_name,
-                    'component_type': graph.nodes[comp_name].get('instance_type', 'Unknown'),
-                    'terminals': sorted(list(set(terminals_list))),
-                    'net': preferred_net_name,
-                    'canonical_net': canonical_net
-                })
+                detected_shorts.append(
+                    {
+                        "type": "component_self_short",
+                        "component": comp_name,
+                        "component_type": graph.nodes[comp_name].get(
+                            "instance_type", "Unknown"
+                        ),
+                        "terminals": sorted(list(set(terminals_list))),
+                        "net": preferred_net_name,
+                        "canonical_net": canonical_net,
+                    }
+                )
 
     # 2. Check for global shorts between predefined important nets
     key_nets_to_check = ["VDD", "GND", "VSS", "VCC"]
@@ -65,11 +73,13 @@ def detect_short_circuits(graph, dsu):
             canonical_net1 = dsu.find(net1_raw)
             canonical_net2 = dsu.find(net2_raw)
             if canonical_net1 == canonical_net2:
-                detected_shorts.append({
-                    'type': 'global_short',
-                    'nets': sorted([net1_raw, net2_raw]),
-                    'canonical_net': canonical_net1
-                })
+                detected_shorts.append(
+                    {
+                        "type": "global_short",
+                        "nets": sorted([net1_raw, net2_raw]),
+                        "canonical_net": canonical_net1,
+                    }
+                )
     return detected_shorts
 
 
@@ -82,13 +92,13 @@ def format_short_circuit_report(detected_shorts):
 
     report_lines = ["Detected Topological Short Circuits:"]
     for short in detected_shorts:
-        if short['type'] == 'component_self_short':
+        if short["type"] == "component_self_short":
             report_lines.append(
                 f"  - Component Short: '{short['component']}' (Type: {short['component_type']}) "
                 f"has terminals {short['terminals']} connected to the same net '{short['net']}' "
                 f"(canonical: '{short['canonical_net']}')."
             )
-        elif short['type'] == 'global_short':
+        elif short["type"] == "global_short":
             report_lines.append(
                 f"  - Global Short: Key nets {short['nets']} are connected together. "
                 f"(Canonical net: '{short['canonical_net']}')"
