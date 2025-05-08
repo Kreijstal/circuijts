@@ -2,6 +2,21 @@
 """AST utility functions for circuit analysis."""
 
 
+def _handle_declaration(stmt, declared_component_instances, component_counts):
+    inst_name = stmt.get("instance_name")
+    comp_type = stmt.get("component_type")
+    if inst_name:  # Parser ensures format, validator checks for duplicates/type
+        declared_component_instances.add(inst_name)
+        if comp_type == "Nmos":
+            component_counts["total_nmos"] += 1
+        elif comp_type == "R":
+            component_counts["total_resistors"] += 1
+        elif comp_type == "C":
+            component_counts["total_capacitors"] += 1
+        elif comp_type == "V":
+            component_counts["total_voltages"] += 1
+
+
 def summarize_circuit_elements(parsed_statements):
     explicit_nodes = set()
     declared_component_instances = set()  # Store names of declared components
@@ -19,87 +34,167 @@ def summarize_circuit_elements(parsed_statements):
         stmt_type = stmt.get("type")
 
         if stmt_type == "declaration":
-            inst_name = stmt.get("instance_name")
-            comp_type = stmt.get("component_type")
-            if inst_name:  # Parser ensures format, validator checks for duplicates/type
-                declared_component_instances.add(inst_name)
-                if comp_type == "Nmos":
-                    component_counts["total_nmos"] += 1
-                elif comp_type == "R":
-                    component_counts["total_resistors"] += 1
-                elif comp_type == "C":
-                    component_counts["total_capacitors"] += 1
-                elif comp_type == "V":
-                    component_counts["total_voltages"] += 1
+            _handle_declaration(stmt, declared_component_instances, component_counts)
+
+
+def _handle_component_connection(stmt, explicit_nodes):
+    comp_name = stmt.get("component_name")  # Assumed declared by validator
+    for conn in stmt.get("connections", []):
+        if conn.get("node"):
+            explicit_nodes.add(conn["node"])
+        if comp_name and conn.get(
+            "terminal"
+        ):  # comp_name validity checked by validator
+            explicit_nodes.add(f"{comp_name}.{conn['terminal']}")
+
+
+def summarize_circuit_elements(parsed_statements):
+    explicit_nodes = set()
+    declared_component_instances = set()  # Store names of declared components
+    implicit_nodes_generated = set()
+    implicit_node_counter = 0
+    component_counts = {
+        "total_nmos": 0,
+        "total_resistors": 0,
+        "total_capacitors": 0,
+        "total_voltages": 0,
+        "total_parallel_blocks": 0,
+    }
+
+    for stmt in parsed_statements:
+        stmt_type = stmt.get("type")
+
+        if stmt_type == "declaration":
+            _handle_declaration(stmt, declared_component_instances, component_counts)
 
         elif stmt_type == "component_connection_block":
-            comp_name = stmt.get("component_name")  # Assumed declared by validator
-            for conn in stmt.get("connections", []):
-                if conn.get("node"):
-                    explicit_nodes.add(conn["node"])
-                if comp_name and conn.get(
-                    "terminal"
-                ):  # comp_name validity checked by validator
-                    explicit_nodes.add(f"{comp_name}.{conn['terminal']}")
+            _handle_component_connection(stmt, explicit_nodes)
+
+
+def _handle_direct_assignment(stmt, explicit_nodes):
+    if stmt.get("source_node"):
+        explicit_nodes.add(stmt["source_node"])
+    if stmt.get("target_node"):
+        explicit_nodes.add(stmt["target_node"])
+
+
+def summarize_circuit_elements(parsed_statements):
+    explicit_nodes = set()
+    declared_component_instances = set()  # Store names of declared components
+    implicit_nodes_generated = set()
+    implicit_node_counter = 0
+    component_counts = {
+        "total_nmos": 0,
+        "total_resistors": 0,
+        "total_capacitors": 0,
+        "total_voltages": 0,
+        "total_parallel_blocks": 0,
+    }
+
+    for stmt in parsed_statements:
+        stmt_type = stmt.get("type")
+
+        if stmt_type == "declaration":
+            _handle_declaration(stmt, declared_component_instances, component_counts)
+
+        elif stmt_type == "component_connection_block":
+            _handle_component_connection(stmt, explicit_nodes)
 
         elif stmt_type == "direct_assignment":
-            if stmt.get("source_node"):
-                explicit_nodes.add(stmt["source_node"])
-            if stmt.get("target_node"):
-                explicit_nodes.add(stmt["target_node"])
+            _handle_direct_assignment(stmt, explicit_nodes)
+
+
+def _handle_series_connection(
+    stmt,
+    explicit_nodes,
+    implicit_nodes_generated,
+    implicit_node_counter,
+    component_counts,
+):
+    if stmt.get(
+        "_invalid_start"
+    ):  # Path structure compromised, skip for implicit node analysis
+        return
+
+    structural_path_elements = []
+    for el in stmt.get("path", []):
+        el_type = el.get("type")
+        if el_type in ["node", "component", "source", "parallel_block"]:
+            structural_path_elements.append(el)
+        # Explicit nodes from path are added below
+
+    if not structural_path_elements:
+        return
+
+    # Add explicit nodes from this path
+    for el in structural_path_elements:
+        if el.get("type") == "node" and el.get("name"):
+            explicit_nodes.add(el["name"])
+
+    # --- Implicit Node Generation for this series path ---
+    # Path must start with a node, so no implicit node at the very start.
+    # structural_path_elements[0] is guaranteed to be a node if _invalid_start is false.
+
+    # Implicit node at the end if needed
+    last_el_in_structural_path = structural_path_elements[-1]
+    # An implicit node is needed at the end if the path has any non-node elements,
+    # and the very last element itself is not a node.
+    if last_el_in_structural_path.get("type") not in ["node"]:
+        implicit_node_counter += 1
+        implicit_nodes_generated.add(f"_implicit_node_{implicit_node_counter}")
+
+    # Implicit nodes between structural elements if neither is a node
+    for i in range(len(structural_path_elements) - 1):
+        el_current = structural_path_elements[i]
+        el_next = structural_path_elements[i + 1]
+
+        # An implicit node is needed between two elements if they are directly connected
+        # AND neither is an explicit node acting as the connection point.
+        # R1 -- C1 needs implicit node. (N1) -- R1 needs no implicit node. R1 -- (N2) needs no implicit node.
+        if el_current.get("type") not in ["node"] and el_next.get("type") not in [
+            "node"
+        ]:
+            implicit_node_counter += 1
+            implicit_nodes_generated.add(f"_implicit_node_{implicit_node_counter}")
+
+    for el in stmt.get("path", []):
+        if el.get("type") == "parallel_block":
+            component_counts["total_parallel_blocks"] += 1
+
+
+def summarize_circuit_elements(parsed_statements):
+    explicit_nodes = set()
+    declared_component_instances = set()  # Store names of declared components
+    implicit_nodes_generated = set()
+    implicit_node_counter = 0
+    component_counts = {
+        "total_nmos": 0,
+        "total_resistors": 0,
+        "total_capacitors": 0,
+        "total_voltages": 0,
+        "total_parallel_blocks": 0,
+    }
+
+    for stmt in parsed_statements:
+        stmt_type = stmt.get("type")
+
+        if stmt_type == "declaration":
+            _handle_declaration(stmt, declared_component_instances, component_counts)
+
+        elif stmt_type == "component_connection_block":
+            _handle_component_connection(stmt, explicit_nodes)
+
+        elif stmt_type == "direct_assignment":
+            _handle_direct_assignment(stmt, explicit_nodes)
 
         elif stmt_type == "series_connection":
-            if stmt.get(
-                "_invalid_start"
-            ):  # Path structure compromised, skip for implicit node analysis
-                continue
-
-            structural_path_elements = []
-            for el in stmt.get("path", []):
-                el_type = el.get("type")
-                if el_type in ["node", "component", "source", "parallel_block"]:
-                    structural_path_elements.append(el)
-                # Explicit nodes from path are added below
-
-            if not structural_path_elements:
-                continue
-
-            # Add explicit nodes from this path
-            for el in structural_path_elements:
-                if el.get("type") == "node" and el.get("name"):
-                    explicit_nodes.add(el["name"])
-
-            # --- Implicit Node Generation for this series path ---
-            # Path must start with a node, so no implicit node at the very start.
-            # structural_path_elements[0] is guaranteed to be a node if _invalid_start is false.
-
-            # Implicit node at the end if needed
-            last_el_in_structural_path = structural_path_elements[-1]
-            # An implicit node is needed at the end if the path has any non-node elements,
-            # and the very last element itself is not a node.
-            if last_el_in_structural_path.get("type") not in ["node"]:
-                implicit_node_counter += 1
-                implicit_nodes_generated.add(f"_implicit_node_{implicit_node_counter}")
-
-            # Implicit nodes between structural elements if neither is a node
-            for i in range(len(structural_path_elements) - 1):
-                el_current = structural_path_elements[i]
-                el_next = structural_path_elements[i + 1]
-
-                # An implicit node is needed between two elements if they are directly connected
-                # AND neither is an explicit node acting as the connection point.
-                # R1 -- C1 needs implicit node. (N1) -- R1 needs no implicit node. R1 -- (N2) needs no implicit node.
-                if el_current.get("type") not in ["node"] and el_next.get(
-                    "type"
-                ) not in ["node"]:
-                    implicit_node_counter += 1
-                    implicit_nodes_generated.add(
-                        f"_implicit_node_{implicit_node_counter}"
-                    )
-
-            for el in stmt.get("path", []):
-                if el.get("type") == "parallel_block":
-                    component_counts["total_parallel_blocks"] += 1
+            _handle_series_connection(
+                stmt,
+                explicit_nodes,
+                implicit_nodes_generated,
+                implicit_node_counter,
+                component_counts,
+            )
 
     all_nodes_combined = explicit_nodes.union(implicit_nodes_generated)
 

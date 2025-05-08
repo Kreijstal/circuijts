@@ -138,7 +138,9 @@ class ASTValidator:
         elif not stmt["connections"] and not original_assignments_str:
             self._add_error(f"Component block for '{comp_name}' is empty.", line_num)
 
-        comp_type_from_decl = self.declared_component_types.get(comp_name, {}).get("type")
+        comp_type_from_decl = self.declared_component_types.get(comp_name, {}).get(
+            "type"
+        )
         if comp_type_from_decl:
             expected_arity = self.component_db.get_arity(comp_type_from_decl)
             if expected_arity is not None and len(stmt["connections"]) > expected_arity:

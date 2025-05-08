@@ -483,16 +483,18 @@ def get_component_connectivity(graph, comp_name):
     return connections, raw_connections
 
 
-def graph_to_structured_ast(graph, dsu):
-    ast_statements = []
-    processed_components = set()
-
-    # Get all component nodes with their full attributes
-    component_nodes_data = {
+def _get_component_nodes_data(graph):
+    """Get all component nodes with their full attributes."""
+    return {
         n: graph.nodes[n]
         for n in graph.nodes
         if graph.nodes[n].get("node_kind") == "component_instance"
     }
+
+
+def _emit_declarations(component_nodes_data):
+    """Emit all component declarations."""
+    ast_statements = []
     all_declared_comp_names = sorted(
         [
             n
@@ -501,7 +503,6 @@ def graph_to_structured_ast(graph, dsu):
         ]
     )
 
-    # 1. Emit all declarations first
     for comp_name in all_declared_comp_names:
         ast_statements.append(
             {
@@ -511,46 +512,24 @@ def graph_to_structured_ast(graph, dsu):
                 "line": 0,
             }
         )
+    return ast_statements, all_declared_comp_names
 
+
+def _reconstruct_multi_terminal_blocks(
+    graph, component_nodes_data, dsu, comp_names, processed_components
+):
+    """Reconstruct connection blocks for multi-terminal components."""
+    ast_statements = []
     MULTI_TERMINAL_TYPES = {"Nmos", "Pmos", "Opamp"}
 
-    # 2. Reconstruct Component Connection Blocks for multi-terminal components
-    for comp_name in all_declared_comp_names:
+    for comp_name in comp_names:
         comp_type = component_nodes_data[comp_name]["instance_type"]
         if comp_type in MULTI_TERMINAL_TYPES:
             connections_map, _ = get_component_connectivity(graph, comp_name)
             if connections_map:
-                block_connections = []
-                terminal_order_preference = []
-                if comp_type in ["Nmos", "Pmos"]:
-                    terminal_order_preference = ["G", "D", "S", "B"]
-                elif comp_type == "Opamp":
-                    terminal_order_preference = ["IN+", "IN-", "OUT", "V+", "V-"]
-
-                present_terminals = list(connections_map.keys())
-                sorted_terminals_for_block = [
-                    t for t in terminal_order_preference if t in present_terminals
-                ]
-                remaining_terminals = sorted(
-                    [
-                        t
-                        for t in present_terminals
-                        if t not in sorted_terminals_for_block
-                    ]
+                block_connections = _create_block_connections(
+                    comp_type, connections_map, dsu
                 )
-                final_sorted_terminals_for_block = (
-                    sorted_terminals_for_block + remaining_terminals
-                )
-
-                for term in final_sorted_terminals_for_block:
-                    net_canonical = connections_map[term]
-                    preferred_net_name = get_preferred_net_name_for_reconstruction(
-                        net_canonical, dsu, allow_implicit_if_only_option=True
-                    )
-                    block_connections.append(
-                        {"terminal": term, "node": preferred_net_name}
-                    )
-
                 if block_connections:
                     ast_statements.append(
                         {
@@ -561,11 +540,62 @@ def graph_to_structured_ast(graph, dsu):
                         }
                     )
                     processed_components.add(comp_name)
+    return ast_statements
 
-    # 3. Reconstruct series/parallel paths for remaining components (including internal behavioral ones)
+
+def _create_block_connections(comp_type, connections_map, dsu):
+    """Create ordered block connections for a component."""
+    terminal_order_preference = []
+    if comp_type in ["Nmos", "Pmos"]:
+        terminal_order_preference = ["G", "D", "S", "B"]
+    elif comp_type == "Opamp":
+        terminal_order_preference = ["IN+", "IN-", "OUT", "V+", "V-"]
+
+    present_terminals = list(connections_map.keys())
+    sorted_terminals = [t for t in terminal_order_preference if t in present_terminals]
+    remaining_terminals = sorted(
+        [t for t in present_terminals if t not in sorted_terminals]
+    )
+    final_sorted_terminals = sorted_terminals + remaining_terminals
+
+    block_connections = []
+    for term in final_sorted_terminals:
+        net_canonical = connections_map[term]
+        preferred_net_name = get_preferred_net_name_for_reconstruction(
+            net_canonical, dsu, allow_implicit_if_only_option=True
+        )
+        block_connections.append({"terminal": term, "node": preferred_net_name})
+    return block_connections
+
+
+def _reconstruct_series_paths(graph, component_nodes_data, dsu, processed_components):
+    """Reconstruct series and parallel paths."""
+    ast_statements = []
+    net_pair_to_components = _group_components_by_net_pairs(
+        graph, component_nodes_data, processed_components
+    )
+
+    for (net1_canon, net2_canon), comps_in_group in net_pair_to_components.items():
+        if not comps_in_group:
+            continue
+
+        path_elements = _create_path_elements(
+            net1_canon, net2_canon, comps_in_group, component_nodes_data, dsu
+        )
+        ast_statements.append(
+            {"type": "series_connection", "path": path_elements, "line": 0}
+        )
+        processed_components.update(comps_in_group)
+
+    return ast_statements
+
+
+def _group_components_by_net_pairs(graph, component_nodes_data, processed_components):
+    """Group components by the nets they connect."""
     net_pair_to_components = {}
-    # Include both declared components and internal behavioral components
-    all_comp_names_in_graph = sorted(
+    MULTI_TERMINAL_TYPES = {"Nmos", "Pmos", "Opamp"}
+
+    all_comp_names = sorted(
         [
             n
             for n, data in component_nodes_data.items()
@@ -574,32 +604,18 @@ def graph_to_structured_ast(graph, dsu):
                 not n.startswith("_internal_")
                 or data.get("instance_type") in ["controlled_source", "noise_source"]
             )
+            and n not in processed_components
         ]
     )
-    remaining_for_paths = [
-        c for c in all_comp_names_in_graph if c not in processed_components
-    ]
 
-    for comp_name in remaining_for_paths:
-        comp_data = component_nodes_data[comp_name]
-        comp_type = comp_data["instance_type"]
-        if (
-            comp_type not in MULTI_TERMINAL_TYPES
-        ):  # R, C, L, V, I, controlled_source, noise_source
+    for comp_name in all_comp_names:
+        comp_type = component_nodes_data[comp_name]["instance_type"]
+        if comp_type not in MULTI_TERMINAL_TYPES:
             connections_map, _ = get_component_connectivity(graph, comp_name)
             distinct_nets = set(connections_map.values())
 
             if len(distinct_nets) == 2:
-                valid_terminals = set()
-                if comp_type in ["V", "I"]:
-                    if "pos" in connections_map and "neg" in connections_map:
-                        valid_terminals.update(["pos", "neg"])
-                elif comp_type in ["R", "C", "L", "controlled_source", "noise_source"]:
-                    path_terms = {"t1_series", "t2_series", "par_t1", "par_t2"}
-                    found_path_terms = {t for t in connections_map if t in path_terms}
-                    if len(found_path_terms) == 2:
-                        valid_terminals.update(found_path_terms)
-
+                valid_terminals = _get_valid_terminals(comp_type, connections_map)
                 if len(valid_terminals) == 2:
                     nets_for_key = tuple(
                         sorted([connections_map[term] for term in valid_terminals])
@@ -607,116 +623,128 @@ def graph_to_structured_ast(graph, dsu):
                     if nets_for_key not in net_pair_to_components:
                         net_pair_to_components[nets_for_key] = []
                     net_pair_to_components[nets_for_key].append(comp_name)
+    return net_pair_to_components
 
-    # Debug print to verify component grouping
-    print("\nDEBUG: net_pair_to_components grouping:")
-    for nets, comps in net_pair_to_components.items():
-        print(f"  Nets {nets}: Components {comps}")
 
-    # Create series paths with parallel blocks
-    for (net1_canon, net2_canon), comps_in_group in net_pair_to_components.items():
-        if not comps_in_group:
-            continue
+def _get_valid_terminals(comp_type, connections_map):
+    """Get valid terminals for path reconstruction."""
+    valid_terminals = set()
+    if comp_type in ["V", "I"]:
+        if "pos" in connections_map and "neg" in connections_map:
+            valid_terminals.update(["pos", "neg"])
+    elif comp_type in ["R", "C", "L", "controlled_source", "noise_source"]:
+        path_terms = {"t1_series", "t2_series", "par_t1", "par_t2"}
+        found_path_terms = {t for t in connections_map if t in path_terms}
+        if len(found_path_terms) == 2:
+            valid_terminals.update(found_path_terms)
+    return valid_terminals
 
-        path_elements = [
+
+def _create_path_elements(
+    net1_canon, net2_canon, comps_in_group, component_nodes_data, dsu
+):
+    """Create path elements for series/parallel reconstruction."""
+    path_elements = [
+        {
+            "type": "node",
+            "name": get_preferred_net_name_for_reconstruction(
+                net1_canon, dsu, allow_implicit_if_only_option=True
+            ),
+        }
+    ]
+
+    if len(comps_in_group) == 1:
+        path_elements.extend(
+            _create_single_component_path(comps_in_group[0], component_nodes_data)
+        )
+    else:
+        path_elements.append(
+            _create_parallel_block(comps_in_group, component_nodes_data)
+        )
+
+    path_elements.append(
+        {
+            "type": "node",
+            "name": get_preferred_net_name_for_reconstruction(
+                net2_canon, dsu, allow_implicit_if_only_option=True
+            ),
+        }
+    )
+    return path_elements
+
+
+def _create_single_component_path(comp_name, component_nodes_data):
+    """Create path elements for a single component."""
+    comp_data = component_nodes_data[comp_name]
+    if comp_data["instance_type"] in ["V", "I"] and "polarity" in comp_data:
+        return [
             {
-                "type": "node",
-                "name": get_preferred_net_name_for_reconstruction(
-                    net1_canon, dsu, allow_implicit_if_only_option=True
-                ),
+                "type": "source",
+                "name": comp_name,
+                "polarity": comp_data["polarity"],
             }
         ]
+    elif comp_name.startswith("_internal_"):
+        if comp_data["instance_type"] == "controlled_source":
+            return [
+                {
+                    "type": "controlled_source",
+                    "expression": comp_data.get("expression", "ERROR_NO_EXPR"),
+                    "direction": comp_data.get("direction", "->"),
+                }
+            ]
+        elif comp_data["instance_type"] == "noise_source":
+            return [
+                {
+                    "type": "noise_source",
+                    "id": comp_data.get("id", "ERROR_NO_ID"),
+                    "direction": comp_data.get("direction", "->"),
+                }
+            ]
+    return [{"type": "component", "name": comp_name}]
 
-        if len(comps_in_group) == 1:
-            comp_name = comps_in_group[0]
-            comp_data = component_nodes_data[comp_name]
-            if comp_data["instance_type"] in ["V", "I"] and "polarity" in comp_data:
-                path_elements.append(
+
+def _create_parallel_block(comps_in_group, component_nodes_data):
+    """Create a parallel block element."""
+    parallel_block_elements = []
+    for comp_name in sorted(comps_in_group):
+        comp_data = component_nodes_data[comp_name]
+        if comp_name.startswith("_internal_"):
+            if comp_data["instance_type"] == "controlled_source":
+                parallel_block_elements.append(
                     {
-                        "type": "source",
-                        "name": comp_name,
-                        "polarity": comp_data["polarity"],
+                        "type": "controlled_source",
+                        "expression": comp_data.get("expression", "ERROR_NO_EXPR"),
+                        "direction": comp_data.get("direction", "->"),
                     }
                 )
-            elif comp_name.startswith("_internal_"):
-                if comp_data["instance_type"] == "controlled_source":
-                    path_elements.append(
-                        {
-                            "type": "controlled_source",
-                            "expression": comp_data.get("expression", "ERROR_NO_EXPR"),
-                            "direction": comp_data.get("direction", "->"),
-                        }
-                    )
-                elif comp_data["instance_type"] == "noise_source":
-                    path_elements.append(
-                        {
-                            "type": "noise_source",
-                            "id": comp_data.get("id", "ERROR_NO_ID"),
-                            "direction": comp_data.get("direction", "->"),
-                        }
-                    )
-            else:
-                path_elements.append({"type": "component", "name": comp_name})
-            processed_components.add(comp_name)
-        else:
-            parallel_block_elements = []
-            for comp_name in sorted(comps_in_group):
-                comp_data = component_nodes_data[comp_name]
-                if comp_name.startswith("_internal_"):
-                    node_data = graph.nodes[comp_name]
-                    if node_data.get("instance_type") == "controlled_source":
-                        parallel_block_elements.append(
-                            {
-                                "type": "controlled_source",
-                                "expression": node_data.get(
-                                    "expression", "ERROR_NO_EXPR"
-                                ),
-                                "direction": node_data.get("direction", "->"),
-                            }
-                        )
-                    elif node_data.get("instance_type") == "noise_source":
-                        parallel_block_elements.append(
-                            {
-                                "type": "noise_source",
-                                "id": node_data.get("id", "ERROR_NO_ID"),
-                                "direction": node_data.get("direction", "->"),
-                            }
-                        )
-                elif (
-                    comp_data["instance_type"] in ["V", "I"] and "polarity" in comp_data
-                ):
-                    parallel_block_elements.append(
-                        {
-                            "type": "source",
-                            "name": comp_name,
-                            "polarity": comp_data["polarity"],
-                        }
-                    )
-                else:
-                    parallel_block_elements.append(
-                        {"type": "component", "name": comp_name}
-                    )
-                processed_components.add(comp_name)
-            path_elements.append(
-                {"type": "parallel_block", "elements": parallel_block_elements}
+            elif comp_data["instance_type"] == "noise_source":
+                parallel_block_elements.append(
+                    {
+                        "type": "noise_source",
+                        "id": comp_data.get("id", "ERROR_NO_ID"),
+                        "direction": comp_data.get("direction", "->"),
+                    }
+                )
+        elif comp_data["instance_type"] in ["V", "I"] and "polarity" in comp_data:
+            parallel_block_elements.append(
+                {
+                    "type": "source",
+                    "name": comp_name,
+                    "polarity": comp_data["polarity"],
+                }
             )
+        else:
+            parallel_block_elements.append({"type": "component", "name": comp_name})
+    return {"type": "parallel_block", "elements": parallel_block_elements}
 
-        path_elements.append(
-            {
-                "type": "node",
-                "name": get_preferred_net_name_for_reconstruction(
-                    net2_canon, dsu, allow_implicit_if_only_option=True
-                ),
-            }
-        )
 
-        ast_statements.append(
-            {"type": "series_connection", "path": path_elements, "line": 0}
-        )
-
-    # 4. Reconstruct Direct Assignments (Net Aliases)
+def _reconstruct_direct_assignments(dsu):
+    """Reconstruct direct assignment statements."""
+    ast_statements = []
     all_handled_aliases = set()
     all_canonical_representatives = dsu.get_all_canonical_representatives()
+
     for canonical_rep in sorted(list(all_canonical_representatives)):
         members = sorted(list(dsu.get_set_members(canonical_rep)))
         if len(members) > 1:
@@ -742,5 +770,36 @@ def graph_to_structured_ast(graph, dsu):
                         }
                     )
                     all_handled_aliases.add(alias_pair_key)
+    return ast_statements
+
+
+def graph_to_structured_ast(graph, dsu):
+    """Convert graph back to structured AST representation."""
+    processed_components = set()
+    component_nodes_data = _get_component_nodes_data(graph)
+
+    # 1. Emit declarations
+    ast_statements, all_declared_comp_names = _emit_declarations(component_nodes_data)
+
+    # 2. Reconstruct multi-terminal component blocks
+    ast_statements.extend(
+        _reconstruct_multi_terminal_blocks(
+            graph,
+            component_nodes_data,
+            dsu,
+            all_declared_comp_names,
+            processed_components,
+        )
+    )
+
+    # 3. Reconstruct series/parallel paths
+    ast_statements.extend(
+        _reconstruct_series_paths(
+            graph, component_nodes_data, dsu, processed_components
+        )
+    )
+
+    # 4. Reconstruct direct assignments
+    ast_statements.extend(_reconstruct_direct_assignments(dsu))
 
     return ast_statements
