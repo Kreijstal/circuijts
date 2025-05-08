@@ -1,5 +1,7 @@
 # Circuijts
 
+[![CI](https://github.com/USERNAME/circuijts/actions/workflows/ci.yml/badge.svg)](https://github.com/Kreijstal/circuijts/actions/workflows/ci.yml)
+
 A Python package for parsing and validating textual circuit descriptions, with a focus on small-signal models and basic electronic components.
 
 ## Overview
@@ -131,4 +133,4 @@ M_amp { D:(VDD), B:(GND), S:(Vout) }
 
 ## License
 
-This project is under the AGPLv3 License. 
+This project is under the AGPLv3 License.
