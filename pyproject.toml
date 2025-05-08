@@ -1,6 +1,6 @@
 [project]
 name = "circuijts"
-version = "0.1.0"
+version = "0.0.1"
 description = "Circuit description language parser and validator"
 authors = []
 readme = "README.md"

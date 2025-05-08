@@ -235,22 +235,16 @@ def print_transformation_rule_description(nmos_original_instance_name="M1"):
     gmb_expr = f"gmB_{id_suffix}*VBS_{id_suffix}"
 
     rule_description = f"""
-Transformation Rule for NMOS instance (e.g., '{nmos_original_instance_name}'):
-The NMOS instance '{nmos_original_instance_name}' connected to external nets (Net_G), (Net_D), (Net_S), (Net_B)
-will be replaced by the following small-signal model structure:
+Rule: NMOS Small-Signal Model Transformation 
 
-1. Declare internal resistor:
-   R {rds_name}
-
-2. Define model connections:
-   (Net_B) : (GND)  ; Original Bulk connection is effectively tied to GND for the model.
-   ; The Gate (Net_G) remains externally connected as per original circuit.
-   ; The small-signal elements are inserted between the original Drain (Net_D) and Source (Net_S) nodes.
-   (Net_D) -- [ {gm_expr} (->) || {gmb_expr} (->) || {rds_name} ] -- (Net_S)
-
-   Note: VGS_{id_suffix} implies (Net_G) - (Net_S).
-         VBS_{id_suffix} implies (Net_B) - (Net_S).
-         These control voltages are defined by the original external connections of '{nmos_original_instance_name}'.
+[STRUCTURED-DATA]
+component_type=Nmos
+original_instance={nmos_original_instance_name}
+model_instance=rds_{id_suffix}
+control_voltages=VGS_{id_suffix},VBS_{id_suffix}
+voltage_defs=VGS_{id_suffix}=V(gate_net)-V(source_net),VBS_{id_suffix}=V(bulk_net)-V(source_net)
+connections=bulk_net:GND,drain_net:[{gm_expr}||{gmb_expr}||{rds_name}],source_net
+[/STRUCTURED-DATA]
 """
     print(rule_description)
 
