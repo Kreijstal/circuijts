@@ -7,11 +7,12 @@ from .graph_utils import ast_to_graph, get_component_connectivity
 
 
 class ASTValidator:
+    """Validates the Abstract Syntax Tree (AST) of a circuit description."""
     def __init__(self, parsed_statements):
         self.parsed_statements = parsed_statements
         self.errors = []
         self.component_db = ComponentDatabase()
-        self.VALID_COMPONENT_TYPES = set(self.component_db.components.keys())
+        self.valid_component_types = set(self.component_db.components.keys())
         self.declared_component_types = {}  # InstanceName -> {"type": TypeStr, "line": line_num}
         self.explicitly_defined_nodes = set()
         self.node_connection_points = {}
@@ -70,10 +71,10 @@ class ASTValidator:
                 f"Component type name '{comp_type}' in declaration has invalid format.",
                 line_num,
             )
-        elif comp_type not in self.VALID_COMPONENT_TYPES:
+        elif comp_type not in self.valid_component_types:
             self._add_error(
                 f"Unknown component type '{comp_type}' for instance '{inst_name}'. "
-                f"Valid types: {sorted(list(self.VALID_COMPONENT_TYPES))}",
+                f"Valid types: {sorted(list(self.valid_component_types))}",
                 line_num,
             )
 
@@ -362,15 +363,12 @@ class GraphValidator:
                 # An unconnected declared component is a different kind of issue (or not an issue)
                 self._add_error(
                     f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) "
-                    f"is not fully connected. Expected arity {expected_arity}, but only "
-                    f"{actual_distinct_terminals_connected} distinct terminals are connected.",
+                    f"has {actual_distinct_terminals_connected} distinct terminals connected, "
+                    f"which is less than its defined arity of {expected_arity}. "
+                    f"Ensure all necessary terminals are connected.",
                     comp_name,
                 )
-
-            # TODO: Future graph-specific checks:
-            # - Check for components with fewer connections than expected (e.g., arity 2 component with only 1 connection)
-            # - Check for floating nets or components not part of the main circuit (if desired)
-
+        # Future graph-specific checks:
         return self.errors
 
 

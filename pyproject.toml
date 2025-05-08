@@ -42,3 +42,6 @@ exclude = [
 
 [tool.coverage.run]
 source = ["circuijt"]
+
+[tool.pylint.format]
+max-line-length = 127
