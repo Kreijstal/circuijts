@@ -1,0 +1,32 @@
+Nmos M0
+Nmos M1L
+Nmos M1R
+Pmos M2L
+Pmos M2R
+
+; Node Definitions
+; (Vin): Input voltage node (labeled).
+; (Vbias): Bias voltage for the current source M0 (labeled).
+; (VDD): Positive power supply (labeled).
+; (GND): Ground reference (symbol).
+; (Vout): Output voltage node (labeled).
+; (_N_tail): Unlabeled common source node of M1L/M1R, and drain of M0.
+; (_N_diode_load): Unlabeled node connecting M1L.D, M2L.D, M2L.G, and M2R.G.
+
+; Connections for Transistor M0 (Current Source Tail)
+M0 { G:(Vbias), S:(GND), D:(_N_tail) }
+
+; Connections for Transistor M1L (Left side of differential pair)
+M1L { G:(Vin), S:(_N_tail), D:(_N_diode_load) }
+
+; Connections for Transistor M1R (Right side of differential pair)
+; M1R.G is connected to Vout, and M1R.D is connected to Vout.
+M1R { G:(Vout), S:(_N_tail), D:(Vout) }
+
+; Connections for Transistor M2L (Diode-connected PMOS load, forms current mirror reference)
+; M2L.D, M2L.G are connected to _N_diode_load.
+M2L { G:(_N_diode_load), S:(VDD), D:(_N_diode_load) }
+
+; Connections for Transistor M2R (PMOS load, output of current mirror)
+; M2R.G is connected to _N_diode_load (M2L's gate/drain). M2R.D is Vout.
+M2R { G:(_N_diode_load), S:(VDD), D:(Vout) }

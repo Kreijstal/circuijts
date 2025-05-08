@@ -198,3 +198,93 @@ def test_terminal_preservation():
                 and a['source_net'] == pin_nets['G']))
     assert pin_nets['S'] == 'GND', f"Source should connect to GND, found: {pin_nets['S']}"
     assert pin_nets['B'] == 'GND', f"Bulk should connect to GND, found: {pin_nets['B']}"
+
+def test_complex_series_parallel_flattening():
+    parser = ProtoCircuitParser()
+    circuit = """
+    R R1, R2, R3
+    C C1
+    V V1
+    (in) -- V1(-+) -- (n1) -- [ R1 || R2 ] -- (n2) -- R3 -- (n3) -- C1 -- (GND)
+    (n1):(alias_for_n1)
+    """
+    statements, errors = parser.parse_text(circuit)
+    assert not errors, f"Parser failed: {errors}"
+
+    graph, dsu = ast_to_graph(statements)
+    flattened = ast_to_flattened_ast(statements, dsu)
+
+    # Check declarations
+    decls = [s for s in flattened if s['type'] == 'declaration']
+    assert len(decls) == 5 # R1, R2, R3, C1, V1
+    expected_comps = {('R', 'R1'), ('R', 'R2'), ('R', 'R3'), ('C', 'C1'), ('V', 'V1')}
+    found_comps = {(d['component_type'], d['instance_name']) for d in decls}
+    assert found_comps == expected_comps
+
+    # Check pin connections
+    pins = [s for s in flattened if s['type'] == 'pin_connection']
+    # V1(2), R1(2), R2(2), R3(2), C1(2) = 10 pins
+    assert len(pins) == 10, f"Expected 10 pin connections, found {len(pins)}"
+
+    # Check net aliases
+    aliases = [s for s in flattened if s['type'] == 'net_alias']
+    # We expect (n1) to be aliased to (alias_for_n1), and DSU might make one canonical.
+    # The flattened AST should reflect the canonical name.
+    # For example, if dsu.find('n1') == 'alias_for_n1', then connections to 'n1' should use 'alias_for_n1'.
+    
+    # Let's find the canonical name for 'n1' and 'alias_for_n1'
+    canonical_n1 = dsu.find('n1')
+    canonical_alias_for_n1 = dsu.find('alias_for_n1')
+    assert canonical_n1 == canonical_alias_for_n1 # They should resolve to the same canonical net
+
+    # Verify V1 connections (example)
+    v1_pins = [p for p in pins if p['component_instance'] == 'V1']
+    assert len(v1_pins) == 2
+    v1_pin_nets = {p['terminal']: p['net'] for p in v1_pins}
+    assert v1_pin_nets.get('neg') == dsu.find('in')
+    assert v1_pin_nets.get('pos') == canonical_n1 # Should connect to the canonical version of n1/alias_for_n1
+
+    # Verify R1 connections (part of parallel block)
+    r1_pins = [p for p in pins if p['component_instance'] == 'R1']
+    assert len(r1_pins) == 2
+    r1_nets = {p['net'] for p in r1_pins}
+    # R1 is between n1 and n2. Its pins should connect to canonical_n1 and dsu.find('n2')
+    assert canonical_n1 in r1_nets
+    assert dsu.find('n2') in r1_nets
+    
+    # Verify R3 connections
+    r3_pins = [p for p in pins if p['component_instance'] == 'R3']
+    assert len(r3_pins) == 2
+    r3_nets = {p['net'] for p in r3_pins}
+    assert dsu.find('n2') in r3_nets
+    assert dsu.find('n3') in r3_nets
+
+    # Verify C1 connections
+    c1_pins = [p for p in pins if p['component_instance'] == 'C1']
+    assert len(c1_pins) == 2
+    c1_nets = {p['net'] for p in c1_pins}
+    assert dsu.find('n3') in c1_nets
+    assert dsu.find('GND') in c1_nets
+
+    # Check that the alias (n1):(alias_for_n1) is correctly represented
+    # One of them should be the source and the other the canonical_net in a net_alias statement,
+    # or all connections just use the canonical name directly.
+    # The ast_to_flattened_ast is expected to produce net_alias statements for all non-canonical names
+    # that were part of the original DSU.
+    
+    alias_found_for_n1_or_alias = False
+    for alias_stmt in aliases:
+        is_n1_alias = (alias_stmt['source_net'] == 'n1' and 
+                       alias_stmt['canonical_net'] == canonical_n1 and 
+                       'n1' != canonical_n1)
+        is_alias_for_n1_alias = (alias_stmt['source_net'] == 'alias_for_n1' and 
+                                 alias_stmt['canonical_net'] == canonical_alias_for_n1 and 
+                                 'alias_for_n1' != canonical_alias_for_n1)
+        if is_n1_alias or is_alias_for_n1_alias:
+            alias_found_for_n1_or_alias = True
+            break
+    
+    # If n1 or alias_for_n1 was not the canonical name, an alias entry should exist.
+    # If one of them *is* the canonical name, then the other should have an alias entry pointing to it.
+    if 'n1' != canonical_n1 or 'alias_for_n1' != canonical_alias_for_n1:
+         assert alias_found_for_n1_or_alias, f"Expected a net_alias for 'n1' or 'alias_for_n1' if they are not canonical. Canonical for n1: {canonical_n1}"

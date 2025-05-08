@@ -1,0 +1,5 @@
+R R2
+C CL
+(M1_S):(Vout)
+(M1_D):(GND)
+(Vout) -- [ gm1*(Vin-Vout) (<-) || -gmB1*Vout (<-) || rds1 || R2 || CL ] -- (GND)
