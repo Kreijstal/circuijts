@@ -1,4 +1,3 @@
-import pytest
 from circuijt.ast_converter import ast_to_flattened_ast, flattened_ast_to_regular_ast
 from circuijt.parser import ProtoCircuitParser
 from circuijt.graph_utils import ast_to_graph, DSU

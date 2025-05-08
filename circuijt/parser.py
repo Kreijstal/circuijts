@@ -3,6 +3,7 @@
 
 import re
 
+
 class ProtoCircuitParser:
     def __init__(self):
         self.parsed_statements = []
@@ -10,22 +11,30 @@ class ProtoCircuitParser:
 
         # Regex patterns
         self.COMMENT_RE = re.compile(r';.*$')
-        self.DECLARATION_RE = re.compile(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$') # Type InstanceName
-        self.NODE_RE = re.compile(r'^\(([a-zA-Z0-9_.]+)\)$') # Allows dot for Dev.Term
-        self.COMPONENT_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$') # For instance names, type names, terminal names
-        self.SOURCE_RE = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*\((-\+|\+-)\)$') # InstanceName (Polarity)
-        self.NAMED_CURRENT_RE = re.compile(r'^(->|<-)([a-zA-Z_][a-zA-Z0-9_]*)$')
-        self.CONTROLLED_SOURCE_RE = re.compile(r'^(.*?)\s*\((->|<-)\)$')
-
-        self.COMPONENT_BLOCK_RE = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*{\s*(.*?)\s*}$', re.DOTALL)
-        self.COMPONENT_BLOCK_ASSIGN_RE = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*\(([a-zA-Z0-9_.]+)\)')
-        # Modified to handle comments after the assignment
-        self.DIRECT_ASSIGN_RE = re.compile(r'^\s*\(([a-zA-Z0-9_.]+)\)\s*:\s*\(([a-zA-Z0-9_.]+)\)')
+        self.DECLARATION_RE = re.compile(
+            r'^[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*$'
+        )  # Type InstanceName
+        self.NODE_RE = re.compile(r'^\(([a-zA-Z0-9_.]+)\)$')  # Allows dot for Dev.Term
+        self.COMPONENT_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')  # For instance names, type names, terminal names
+        self.SOURCE_RE = re.compile(
+            r'^([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\((\-\+|\+-)\)$'
+        )  # InstanceName (Polarity)
+        self.NAMED_CURRENT_RE = re.compile(r'^(->|<\-)([a-zA-Z_][a-zA-Z0-9_]*)$')
+        self.CONTROLLED_SOURCE_RE = re.compile(r'^(.*?)\s*\((->|<\-)\)$')
+        self.COMPONENT_BLOCK_RE = re.compile(
+            r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*{\s*(.*?)\s*}$', re.DOTALL
+        )
+        self.COMPONENT_BLOCK_ASSIGN_RE = re.compile(
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*\(([a-zA-Z0-9_.]+)\)'
+        )
+        self.DIRECT_ASSIGN_RE = re.compile(
+            r'^\s*\(([a-zA-Z0-9_.]+)\)\s*:\s*\(([a-zA-Z0-9_.]+)\)'
+        )
 
     def _parse_element(self, element_str, line_num, context="series"):
         # Strip any inline comments first
         element_str = self.COMMENT_RE.sub('', element_str).strip()
-        
+
         match_node = self.NODE_RE.match(element_str)
         if match_node:
             node_name = match_node.group(1)
