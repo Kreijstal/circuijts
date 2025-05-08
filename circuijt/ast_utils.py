@@ -290,3 +290,48 @@ def find_declarations_by_type(statements, component_type):
         list: List of matching declaration statements
     """
     return [stmt for stmt in statements if stmt.get("type") == "declaration" and stmt.get("component_type") == component_type]
+
+
+def _flatten_series_path_element(
+    element,
+    dsu,
+    current_net_name,
+    flattened_elements,
+    path_context,
+    line_num,
+):
+    """Flatten a series path element for proto generation.
+
+    Args:
+        element (dict): The series path element AST node.
+        dsu (object): The disjoint set union-find structure for tracking connected components.
+        current_net_name (str): The current net name being processed.
+        flattened_elements (set): Set of already flattened elements to avoid duplicates.
+        path_context (list): The context of the path for hierarchical naming.
+        line_num (int): The line number in the original source for error reporting.
+
+    Returns:
+        str: The flattened representation of the series path element.
+    """
+    element_type = element.get("type")
+
+    if element_type == "node":
+        return f"({element['name']})"
+
+    elif element_type == "component":
+        return element["name"]
+
+    elif element_type == "source":
+        return f"{element['name']} ({element['polarity']})"
+
+    elif element_type == "named_current":
+        return f"{element['direction']}{element['name']}"
+
+    elif element_type == "parallel_block":
+        return _proto_handle_parallel_block(element)
+
+    elif element_type == "error":
+        return f"<ERROR_IN_PATH: {element.get('message', 'Malformed element')}>"
+
+    else:
+        return f"<UNKNOWN_PATH_TYPE: {element_type}>"

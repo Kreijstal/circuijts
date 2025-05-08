@@ -2,8 +2,8 @@
 """Database of components and their properties."""
 
 
-class ComponentDatabase:
-    """A database for storing component properties like arity."""
+class ComponentDatabase:  # pylint: disable=too-few-public-methods
+    """Manages the database of known circuit components and their properties."""
 
     def __init__(self):
         # Define the database of components and their properties

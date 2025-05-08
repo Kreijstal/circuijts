@@ -6,8 +6,9 @@ from .components import ComponentDatabase
 from .graph_utils import ast_to_graph, get_component_connectivity
 
 
-class ASTValidator:
+class ASTValidator:  # pylint: disable=too-few-public-methods
     """Validates the Abstract Syntax Tree (AST) of a circuit description."""
+
     def __init__(self, parsed_statements):
         self.parsed_statements = parsed_statements
         self.errors = []
@@ -45,6 +46,7 @@ class ASTValidator:
         return True
 
     def validate(self):
+        """Validates the AST, checking for declaration errors and connection errors."""
         self.errors = []
         self.declared_component_types = {}
         self.explicitly_defined_nodes = set()
@@ -241,7 +243,7 @@ class ASTValidator:
 
     def _validate_named_current(self, item, path, index, line_num):
         """Validate a named current within a series path."""
-        if index == 0 or index == len(path) - 1:
+        if index in (0, len(path) - 1):
             self._add_error(
                 f"Named current '{item['direction']}{item['name']}' must be between two elements.",
                 line_num,
@@ -308,7 +310,9 @@ class ASTValidator:
         return self.errors
 
 
-class GraphValidator:
+class GraphValidator:  # pylint: disable=too-few-public-methods
+    """Validates the graph representation of a circuit."""
+
     def __init__(self, graph, dsu, component_db, declared_component_types):
         self.graph = graph
         self.dsu = dsu
@@ -321,6 +325,7 @@ class GraphValidator:
         self.errors.append(f"{prefix}{message}")
 
     def validate(self):
+        """Validates the graph, checking for component arity and other structural issues."""
         self.errors = []
         component_instance_nodes = [
             n for n, data in self.graph.nodes(data=True) if data.get("node_kind") == "component_instance"
@@ -348,7 +353,7 @@ class GraphValidator:
 
             # Get actual connections from the graph
             # get_component_connectivity returns: connections_map (term -> net), raw_connections (list of dicts)
-            connections_map, raw_connections = get_component_connectivity(self.graph, comp_name)
+            connections_map, _ = get_component_connectivity(self.graph, comp_name)
             actual_distinct_terminals_connected = len(connections_map)
 
             if actual_distinct_terminals_connected > expected_arity:
@@ -368,11 +373,13 @@ class GraphValidator:
                     f"Ensure all necessary terminals are connected.",
                     comp_name,
                 )
-        # Future graph-specific checks:
+
         return self.errors
 
 
-class CircuitValidator:
+class CircuitValidator:  # pylint: disable=too-few-public-methods
+    """Validates a circuit description by performing AST and graph validations."""
+
     def __init__(self, parsed_statements):
         self.parsed_statements = parsed_statements
         self.component_db = ComponentDatabase()
@@ -384,6 +391,7 @@ class CircuitValidator:
         self.debug_info[category].append(info)
 
     def validate(self):
+        """Performs all validation checks on the circuit AST and graph, returning errors and debug info."""
         all_errors = []
         self.debug_info = {}  # Reset debug info
 
@@ -422,7 +430,7 @@ class CircuitValidator:
                 },
             )
 
-        except Exception as e:
+        except ValueError as e:  # More specific exception if possible
             err_msg = f"Critical Error during graph construction: {e}. Debug info: "
             err_msg += f"Statements being processed: {[s.get('type') for s in self.parsed_statements]}"
             all_errors.append(err_msg)
