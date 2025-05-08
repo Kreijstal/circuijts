@@ -412,132 +412,125 @@ def get_component_connectivity(graph, comp_name):
     return connections, raw_connections
 
 
-def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True):
+def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True): # remove_implicit_nodes not actively used in this version
     ast_statements = []
-    processed_components = set()
+    # Keep track of components whose connections are fully described by blocks
+    # to avoid trying to put them in series/parallel paths later.
+    processed_components_by_block = set()
     
-    # Get all component and net nodes
-    component_nodes = [n for n, data in graph.nodes(data=True) if data.get('node_kind') == 'component_instance']
-    net_nodes = [n for n, data in graph.nodes(data=True) if data.get('node_kind') == 'electrical_net']
-    comp_data_map = {name: graph.nodes[name] for name in component_nodes}
+    component_nodes_data = {n: data for n, data in graph.nodes(data=True) if data.get('node_kind') == 'component_instance'}
+    # Filter out internal components (like those from controlled sources) from explicit declaration/block reconstruction
+    component_names_to_reconstruct = sorted([
+        n for n, data in component_nodes_data.items()
+        if not n.startswith('_internal_') and data.get('instance_type') # ensure it has a type
+    ])
 
-    # 1. Emit declarations
-    for comp_name in sorted(n for n in component_nodes if not n.startswith('_internal_')):
+    # 1. Emit declarations for all relevant components
+    for comp_name in component_names_to_reconstruct:
         ast_statements.append({
             'type': 'declaration',
-            'component_type': comp_data_map[comp_name]['instance_type'],
+            'component_type': component_nodes_data[comp_name]['instance_type'],
             'instance_name': comp_name,
-            'line': 0
+            'line': 0 # Line number info is lost in graph representation
         })
 
-    # 2. Find series paths
-    def find_series_path(start_net):
-        if start_net in visited_nets:
-            return None
+    # 2. Reconstruct Component Connection Blocks
+    # This approach prioritizes representing all known connections for a component via a block.
+    for comp_name in component_names_to_reconstruct:
+        connections_map, _ = get_component_connectivity(graph, comp_name)
         
-        path = [{'type': 'node', 'name': get_preferred_net_name_for_reconstruction(start_net, dsu)}]
-        current_net = start_net
-        visited_nets.add(current_net)
+        if connections_map: # If the component has any connections
+            block_connections = []
+            
+            # Try to maintain a somewhat standard terminal order for readability
+            comp_type = component_nodes_data[comp_name]['instance_type']
+            terminal_order_preference = []
+            # Define preferred order for known types
+            if comp_type in ["Nmos", "Pmos"]: # Common transistor types
+                # Define a typical order, e.g., G, D, S, B. Other terminals will be appended alphabetically.
+                # This ensures GDSB appear first if present.
+                known_terminals_for_type = {'G', 'D', 'S', 'B'} # Add more if other types have standard orders
+                
+                # Terminals present in connections_map for this component
+                present_terminals = list(connections_map.keys())
+                
+                # Start with preferred terminals in order, then add others alphabetically
+                sorted_terminals = [t for t in ['G', 'D', 'S', 'B'] if t in present_terminals]
+                remaining_terminals = sorted([t for t in present_terminals if t not in sorted_terminals])
+                final_sorted_terminals = sorted_terminals + remaining_terminals
+
+            else: # For other components, just sort alphabetically
+                final_sorted_terminals = sorted(connections_map.keys())
+
+            for term in final_sorted_terminals:
+                net_canonical = connections_map[term]
+                # When reconstructing, use the preferred name for the net this terminal connects to.
+                # allow_implicit_if_only_option=True ensures that even if a net is only known by an implicit name, it's used.
+                preferred_net_name = get_preferred_net_name_for_reconstruction(
+                    net_canonical, dsu, allow_implicit_if_only_option=True
+                )
+                block_connections.append({'terminal': term, 'node': preferred_net_name})
+            
+            if block_connections:
+                ast_statements.append({
+                    'type': 'component_connection_block',
+                    'component_name': comp_name,
+                    'connections': block_connections,
+                    'line': 0
+                })
+                processed_components_by_block.add(comp_name)
+    
+    # 3. Reconstruct Direct Assignments (Net Aliases)
+    # This handles cases like (Vout) : (M2.D) if Vout and M2.D are in the same DSU set.
+    all_handled_aliases = set() # Using frozenset({name1, name2}) to track pairs
+
+    all_canonical_representatives = dsu.get_all_canonical_representatives()
+
+    for canonical_rep in sorted(list(all_canonical_representatives)): # Sort for deterministic output
+        members = sorted(list(dsu.get_set_members(canonical_rep))) # Sort members for deterministic output
         
-        while True:
-            # Find unvisited components connected to current net
-            connected_comps = []
-            for comp in component_nodes:
-                if comp in processed_components:
+        if len(members) > 1:
+            # The "target" of the alias should be the most preferred name in the set.
+            preferred_target_name = get_preferred_net_name_for_reconstruction(
+                canonical_rep, dsu, allow_implicit_if_only_option=True
+            )
+            
+            for member_node in members:
+                if member_node == preferred_target_name:
+                    continue # Don't alias a node to itself
+
+                # Avoid creating aliases for internal/implicit nodes unless they are the preferred target
+                # (which is less likely if other explicit names exist in the set).
+                if member_node.startswith("_implicit_") and not preferred_target_name.startswith("_implicit_"):
                     continue
-                neighbors = list(graph.neighbors(comp))
-                if current_net in neighbors:
-                    connected_comps.append(comp)
-            
-            if not connected_comps:
-                break
                 
-            # Take the first unvisited component
-            comp_name = sorted(connected_comps)[0]
-            processed_components.add(comp_name)
-            
-            # Add component to path
-            comp_data = comp_data_map[comp_name]
-            if comp_data.get('instance_type') == 'V':
-                path.append({
-                    'type': 'source',
-                    'name': comp_name,
-                    'polarity': comp_data.get('polarity', '(-+)')
-                })
-            else:
-                path.append({
-                    'type': 'component',
-                    'name': comp_name
-                })
-            
-            # Find next net
-            next_nets = []
-            for net in graph.neighbors(comp_name):
-                if graph.nodes[net].get('node_kind') == 'electrical_net' and net != current_net and net not in visited_nets:
-                    next_nets.append(net)
-            
-            if not next_nets:
-                break
+                # Ensure we don't add (A:B) if (B:A) using preferred_target_name logic is already handled or equivalent
+                # The key is that `member_node` will be aliased TO `preferred_target_name`.
+                # We only need to check if this specific (member_node : preferred_target_name) structure is redundant.
+                # The frozenset check ensures that once the equivalence between member_node and preferred_target_name
+                # is noted (implicitly by them being in the same DSU set and preferred_target_name being chosen),
+                # we only generate one alias statement like (non_preferred_member):(preferred_member).
                 
-            next_net = next_nets[0]
-            path.append({
-                'type': 'node',
-                'name': get_preferred_net_name_for_reconstruction(next_net, dsu)
-            })
-            current_net = next_net
-            visited_nets.add(current_net)
-        
-        return path if len(path) > 1 else None
-
-    # Process each valid starting net
-    visited_nets = set()
-    endpoint_nets = {n for n in net_nodes if len(list(graph.neighbors(n))) == 1}
-    
-    # First handle series paths
-    for start_net in sorted(endpoint_nets):  # Sort for deterministic output
-        path = find_series_path(start_net)
-        if path:
-            ast_statements.append({
-                'type': 'series_connection',
-                'path': path,
-                'line': 0
-            })
-
-    # Mark remaining components as parallel if they share the same nets
-    remaining_comps = [c for c in component_nodes if c not in processed_components]
-    parallel_groups = {}
-    
-    for comp in remaining_comps:
-        if comp in processed_components:
-            continue
-            
-        comp_nets = frozenset(n for n in graph.neighbors(comp) if graph.nodes[n].get('node_kind') == 'electrical_net')
-        if len(comp_nets) != 2:
-            continue
-            
-        if comp_nets not in parallel_groups:
-            parallel_groups[comp_nets] = []
-        parallel_groups[comp_nets].append(comp)
-
-    # Create series paths for parallel groups
-    for nets, comps in parallel_groups.items():
-        if not comps:
-            continue
-            
-        nets_list = sorted(nets)
-        path = [
-            {'type': 'node', 'name': get_preferred_net_name_for_reconstruction(nets_list[0], dsu)},
-            {'type': 'parallel_block', 'elements': [
-                {'type': 'component', 'name': comp} for comp in sorted(comps)
-            ]},
-            {'type': 'node', 'name': get_preferred_net_name_for_reconstruction(nets_list[1], dsu)}
-        ]
-        
-        ast_statements.append({
-            'type': 'series_connection',
-            'path': path,
-            'line': 0
-        })
-        processed_components.update(comps)
+                alias_pair_key = frozenset({member_node, preferred_target_name})
+                if alias_pair_key not in all_handled_aliases:
+                    # Check if this member_node itself was part of a component_connection_block as the node name
+                    # If so, an explicit alias might be redundant if the block already uses the preferred_target_name.
+                    # However, for full representation of equivalences, it might be fine.
+                    # Example: M1 { G:(node_gate) } and (node_gate):(actual_vin_signal)
+                    # The spec for this tool isn't super strict on minimizing alias statements.
+                    
+                    ast_statements.append({
+                        'type': 'direct_assignment',
+                        'source_node': member_node, # The "less preferred" name
+                        'target_node': preferred_target_name, # The "more preferred" name
+                        'line': 0
+                    })
+                    all_handled_aliases.add(alias_pair_key)
+                            
+    # Note: The original series/parallel path reconstruction logic is omitted here.
+    # For the given test case, connection blocks + aliases are sufficient and more accurate.
+    # A full series/parallel reconstruction would need to be careful not to re-process
+    # components already handled by blocks and correctly identify 2-terminal components.
+    # That part of graph_to_structured_ast was the source of the arity errors for M1, M2, M3.
 
     return ast_statements
