@@ -148,15 +148,17 @@ def test_internal_components_handling():
     
     flattened = ast_to_flattened_ast(statements, dsu)
     
-    # Check internal voltage source connections are preserved
-    internal_pins = [p for p in flattened if p['type'] == 'pin_connection' 
-                    and p['component_instance'].startswith('_internal_')]
-                    
-    print("\nInternal component connections:")
-    for pin in internal_pins:
+    # Check voltage source connections are preserved
+    v1_pins = [p for p in flattened if p['type'] == 'pin_connection'
+               and p['component_instance'] == 'V1']
+
+    print("\nVoltage source connections:")
+    for pin in v1_pins:
         print(f"  {pin['component_instance']}.{pin['terminal']} -> {pin['net']}")
-                    
-    assert len(internal_pins) > 0, "No internal component connections found"
+
+    assert len(v1_pins) == 2, "Expected 2 pin connections for V1"
+    assert any(p['terminal'] == 'neg' for p in v1_pins), "V1 should have neg terminal connected"
+    assert any(p['terminal'] == 'pos' for p in v1_pins), "V1 should have pos terminal connected"
 
 def test_terminal_preservation():
     parser = ProtoCircuitParser()

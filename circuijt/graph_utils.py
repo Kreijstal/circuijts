@@ -226,89 +226,63 @@ def ast_to_graph(parsed_statements):
                 item = path[i]
                 item_type = item.get('type')
 
-                # Determine the `next_attach_point_canonical`
-                # If the element after `item` is an explicit node, that's the next attach point.
-                # Otherwise, if `item` is a connecting element (component, source, parallel_block),
-                # an implicit node is needed.
-                next_attach_point_canonical = None
-                is_next_point_implicit = False
-
-                if i + 1 < len(path) and path[i+1].get('type') == 'node':
-                    next_attach_point_canonical = electrical_nets_dsu.find(path[i+1]['name'])
-                elif item_type not in ['node', 'named_current', 'error']: # component, source, parallel_block
-                    # This element needs a connection point after it, which will be implicit.
-                    implicit_node_name_raw = f"_implicit_{implicit_node_idx}"
-                    # Ensure GND/VDD special nodes remain canonical when creating implicit nodes
-                    if current_attach_point_canonical in ['GND', 'VDD']:
-                        # Don't create new implicit node - use the special node directly
-                        next_attach_point_canonical = current_attach_point_canonical
-                    else:
-                        next_attach_point_canonical = electrical_nets_dsu.find(implicit_node_name_raw) # adds to DSU
-                    is_next_point_implicit = True
-
-                if next_attach_point_canonical and not G.has_node(next_attach_point_canonical):
-                    G.add_node(next_attach_point_canonical, node_kind='electrical_net')
-
-                # Handle the current item
-                if item_type == 'component':
-                    comp_name = item['name']
-                    if comp_name not in declared_components: continue # Error already handled by validator ideally
-                    comp_node_name = declared_components[comp_name]['instance_node_name']
-
-                    # For 2-terminal components in series, use generic terminal names
-                    G.add_edge(comp_node_name, current_attach_point_canonical, terminal='t1_series')
-                    G.add_edge(comp_node_name, next_attach_point_canonical, terminal='t2_series')
-                    current_attach_point_canonical = next_attach_point_canonical
-                    if is_next_point_implicit: implicit_node_idx += 1
-
-                elif item_type == 'source':
-                    source_name = item['name']
-                    polarity = item['polarity']
-                    if source_name not in declared_components: continue # Error already handled by validator ideally
-                    source_node_name = declared_components[source_name]['instance_node_name']
-
-                    # Store polarity as an attribute on the source component node
-                    G.nodes[source_node_name]['polarity'] = polarity
-
-                    # For (-+) polarity:
-                    # - terminal 'neg' connects to current_attach_point (left side)
-                    # - terminal 'pos' connects to next_attach_point (right side)
-                    # For (+-) polarity, the opposite
-                    if polarity == '(-+)':
-                        G.add_edge(source_node_name, current_attach_point_canonical, terminal='neg')
-                        G.add_edge(source_node_name, next_attach_point_canonical, terminal='pos')
-                    else:
-                        G.add_edge(source_node_name, current_attach_point_canonical, terminal='pos')
-                        G.add_edge(source_node_name, next_attach_point_canonical, terminal='neg')
-                    current_attach_point_canonical = next_attach_point_canonical
-                    if is_next_point_implicit: implicit_node_idx += 1
-
-                elif item_type == 'node': # This node becomes the new current_attach_point
+                # Skip if item is a node - it becomes the new current_attach_point for next iteration
+                if item_type == 'node':
                     original_node_name_in_path = item['name']
                     current_attach_point_canonical = electrical_nets_dsu.find(original_node_name_in_path)
-                    # Ensure it exists in graph (should from pre-scan or previous step)
                     if not G.has_node(current_attach_point_canonical):
                          G.add_node(current_attach_point_canonical, node_kind='electrical_net')
-                    
-                    # MODIFICATION START: Ensure connectivity for intermediate nodes if they are device terminals
                     if '.' in original_node_name_in_path:
                         comp_part, term_part = original_node_name_in_path.split('.', 1)
                         if comp_part in declared_components:
                             G.add_edge(comp_part, current_attach_point_canonical, terminal=term_part)
-                    # MODIFICATION END
+                    continue
 
+                # Item is a component, source, or parallel_block - determine next attach point
+                next_attach_point_canonical = None
+                created_new_implicit_node = False
+
+                if i + 1 < len(path) and path[i+1].get('type') == 'node':
+                    next_explicit_node_name = path[i+1]['name']
+                    next_attach_point_canonical = electrical_nets_dsu.find(next_explicit_node_name)
+                else:
+                    # Need an implicit node after this item
+                    implicit_node_name_raw = f"_implicit_{implicit_node_idx}"
+                    next_attach_point_canonical = electrical_nets_dsu.find(implicit_node_name_raw)
+                    if not G.has_node(next_attach_point_canonical):
+                        created_new_implicit_node = True
+                
+                if next_attach_point_canonical and not G.has_node(next_attach_point_canonical):
+                    G.add_node(next_attach_point_canonical, node_kind='electrical_net')
+
+                # Handle structural items (component, source, parallel_block)
+                if item_type == 'component':
+                    comp_name = item['name']
+                    if comp_name not in declared_components: continue
+                    comp_node_name = declared_components[comp_name]['instance_node_name']
+                    G.add_edge(comp_node_name, current_attach_point_canonical, terminal='t1_series', key='t1_series')
+                    G.add_edge(comp_node_name, next_attach_point_canonical, terminal='t2_series', key='t2_series')
+
+                elif item_type == 'source':
+                    source_name = item['name']
+                    polarity = item['polarity']
+                    if source_name not in declared_components: continue
+                    source_node_name = declared_components[source_name]['instance_node_name']
+                    G.nodes[source_node_name]['polarity'] = polarity
+                    if polarity == '(-+)':
+                        G.add_edge(source_name, current_attach_point_canonical, terminal='neg', key='neg')
+                        G.add_edge(source_name, next_attach_point_canonical, terminal='pos', key='pos')
+                    else: # (+-)
+                        G.add_edge(source_name, current_attach_point_canonical, terminal='pos', key='pos')
+                        G.add_edge(source_name, next_attach_point_canonical, terminal='neg', key='neg')
+                
                 elif item_type == 'parallel_block':
-                    parallel_start_node_canonical = current_attach_point_canonical
-                    parallel_end_node_canonical = next_attach_point_canonical
-
                     for pel in item.get('elements', []):
                         element_node_name_in_graph = None
                         attrs = {'node_kind': 'component_instance'}
-
                         if pel['type'] == 'component':
                             if pel['name'] in declared_components:
                                 element_node_name_in_graph = declared_components[pel['name']]['instance_node_name']
-                            else: continue # Error
                         elif pel['type'] == 'controlled_source':
                             element_node_name_in_graph = f"_internal_cs_{internal_component_idx}"
                             attrs.update({'instance_type': 'controlled_source',
@@ -323,12 +297,13 @@ def ast_to_graph(parsed_statements):
                         if element_node_name_in_graph:
                             if not G.has_node(element_node_name_in_graph):
                                 G.add_node(element_node_name_in_graph, **attrs)
-                            # Generic terminal names for elements within a parallel block
-                            G.add_edge(element_node_name_in_graph, parallel_start_node_canonical, terminal='par_t1', key='par_t1')
-                            G.add_edge(element_node_name_in_graph, parallel_end_node_canonical, terminal='par_t2', key='par_t2')
+                            G.add_edge(element_node_name_in_graph, current_attach_point_canonical, terminal='par_t1', key='par_t1')
+                            G.add_edge(element_node_name_in_graph, next_attach_point_canonical, terminal='par_t2', key='par_t2')
 
-                    current_attach_point_canonical = parallel_end_node_canonical
-                    if is_next_point_implicit: implicit_node_idx += 1
+                # Update current attach point and implicit node counter
+                current_attach_point_canonical = next_attach_point_canonical
+                if created_new_implicit_node:
+                    implicit_node_idx += 1
 
                 elif item_type == 'named_current':
                     # Named currents are annotations on connections.
@@ -412,125 +387,137 @@ def get_component_connectivity(graph, comp_name):
     return connections, raw_connections
 
 
-def graph_to_structured_ast(graph, dsu, remove_implicit_nodes=True): # remove_implicit_nodes not actively used in this version
+def graph_to_structured_ast(graph, dsu):
     ast_statements = []
-    # Keep track of components whose connections are fully described by blocks
-    # to avoid trying to put them in series/parallel paths later.
-    processed_components_by_block = set()
-    
+    processed_components = set()
+
     component_nodes_data = {n: data for n, data in graph.nodes(data=True) if data.get('node_kind') == 'component_instance'}
-    # Filter out internal components (like those from controlled sources) from explicit declaration/block reconstruction
-    component_names_to_reconstruct = sorted([
+    all_declared_comp_names = sorted([
         n for n, data in component_nodes_data.items()
-        if not n.startswith('_internal_') and data.get('instance_type') # ensure it has a type
+        if not n.startswith('_internal_') and data.get('instance_type')
     ])
 
-    # 1. Emit declarations for all relevant components
-    for comp_name in component_names_to_reconstruct:
+    # 1. Emit all declarations first
+    for comp_name in all_declared_comp_names:
         ast_statements.append({
             'type': 'declaration',
             'component_type': component_nodes_data[comp_name]['instance_type'],
             'instance_name': comp_name,
-            'line': 0 # Line number info is lost in graph representation
+            'line': 0
         })
 
-    # 2. Reconstruct Component Connection Blocks
-    # This approach prioritizes representing all known connections for a component via a block.
-    for comp_name in component_names_to_reconstruct:
-        connections_map, _ = get_component_connectivity(graph, comp_name)
-        
-        if connections_map: # If the component has any connections
-            block_connections = []
-            
-            # Try to maintain a somewhat standard terminal order for readability
-            comp_type = component_nodes_data[comp_name]['instance_type']
-            terminal_order_preference = []
-            # Define preferred order for known types
-            if comp_type in ["Nmos", "Pmos"]: # Common transistor types
-                # Define a typical order, e.g., G, D, S, B. Other terminals will be appended alphabetically.
-                # This ensures GDSB appear first if present.
-                known_terminals_for_type = {'G', 'D', 'S', 'B'} # Add more if other types have standard orders
-                
-                # Terminals present in connections_map for this component
+    MULTI_TERMINAL_TYPES = {"Nmos", "Pmos", "Opamp"}
+
+    # 2. Reconstruct Component Connection Blocks for multi-terminal components
+    for comp_name in all_declared_comp_names:
+        comp_type = component_nodes_data[comp_name]['instance_type']
+        if comp_type in MULTI_TERMINAL_TYPES:
+            connections_map, _ = get_component_connectivity(graph, comp_name)
+            if connections_map:
+                block_connections = []
+                terminal_order_preference = []
+                if comp_type in ["Nmos", "Pmos"]: terminal_order_preference = ['G', 'D', 'S', 'B']
+                elif comp_type == "Opamp": terminal_order_preference = ['IN+', 'IN-', 'OUT', 'V+', 'V-']
+
                 present_terminals = list(connections_map.keys())
+                sorted_terminals_for_block = [t for t in terminal_order_preference if t in present_terminals]
+                remaining_terminals = sorted([t for t in present_terminals if t not in sorted_terminals_for_block])
+                final_sorted_terminals_for_block = sorted_terminals_for_block + remaining_terminals
                 
-                # Start with preferred terminals in order, then add others alphabetically
-                sorted_terminals = [t for t in ['G', 'D', 'S', 'B'] if t in present_terminals]
-                remaining_terminals = sorted([t for t in present_terminals if t not in sorted_terminals])
-                final_sorted_terminals = sorted_terminals + remaining_terminals
+                for term in final_sorted_terminals_for_block:
+                    net_canonical = connections_map[term]
+                    preferred_net_name = get_preferred_net_name_for_reconstruction(
+                        net_canonical, dsu, allow_implicit_if_only_option=True
+                    )
+                    block_connections.append({'terminal': term, 'node': preferred_net_name})
+                
+                if block_connections:
+                    ast_statements.append({
+                        'type': 'component_connection_block',
+                        'component_name': comp_name,
+                        'connections': block_connections,
+                        'line': 0
+                    })
+                    processed_components.add(comp_name)
 
-            else: # For other components, just sort alphabetically
-                final_sorted_terminals = sorted(connections_map.keys())
+    # 3. Reconstruct series/parallel paths for remaining components
+    net_pair_to_components = {}
+    remaining_for_paths = [c for c in all_declared_comp_names if c not in processed_components]
 
-            for term in final_sorted_terminals:
-                net_canonical = connections_map[term]
-                # When reconstructing, use the preferred name for the net this terminal connects to.
-                # allow_implicit_if_only_option=True ensures that even if a net is only known by an implicit name, it's used.
-                preferred_net_name = get_preferred_net_name_for_reconstruction(
-                    net_canonical, dsu, allow_implicit_if_only_option=True
-                )
-                block_connections.append({'terminal': term, 'node': preferred_net_name})
+    for comp_name in remaining_for_paths:
+        comp_type = component_nodes_data[comp_name]['instance_type']
+        if comp_type not in MULTI_TERMINAL_TYPES: # R, C, L, V, I
+            connections_map, _ = get_component_connectivity(graph, comp_name)
+            distinct_nets = set(connections_map.values())
             
-            if block_connections:
-                ast_statements.append({
-                    'type': 'component_connection_block',
-                    'component_name': comp_name,
-                    'connections': block_connections,
-                    'line': 0
-                })
-                processed_components_by_block.add(comp_name)
-    
-    # 3. Reconstruct Direct Assignments (Net Aliases)
-    # This handles cases like (Vout) : (M2.D) if Vout and M2.D are in the same DSU set.
-    all_handled_aliases = set() # Using frozenset({name1, name2}) to track pairs
+            if len(distinct_nets) == 2:
+                valid_terminals = set()
+                if comp_type in ['V', 'I']:
+                    if 'pos' in connections_map and 'neg' in connections_map:
+                         valid_terminals.update(['pos', 'neg'])
+                elif comp_type in ['R', 'C', 'L']:
+                    path_terms = {'t1_series', 't2_series', 'par_t1', 'par_t2'}
+                    found_path_terms = {t for t in connections_map if t in path_terms}
+                    if len(found_path_terms) == 2:
+                         valid_terminals.update(found_path_terms)
+                
+                if len(valid_terminals) == 2:
+                    nets_for_key = tuple(sorted([connections_map[term] for term in valid_terminals]))
+                    if nets_for_key not in net_pair_to_components:
+                        net_pair_to_components[nets_for_key] = []
+                    net_pair_to_components[nets_for_key].append(comp_name)
 
-    all_canonical_representatives = dsu.get_all_canonical_representatives()
+    # Create series paths with parallel blocks
+    for (net1_canon, net2_canon), comps_in_group in net_pair_to_components.items():
+        if not comps_in_group: continue
 
-    for canonical_rep in sorted(list(all_canonical_representatives)): # Sort for deterministic output
-        members = sorted(list(dsu.get_set_members(canonical_rep))) # Sort members for deterministic output
+        path_elements = [{'type': 'node', 'name': get_preferred_net_name_for_reconstruction(net1_canon, dsu, allow_implicit_if_only_option=True)}]
         
+        if len(comps_in_group) == 1:
+            comp_name = comps_in_group[0]
+            comp_data = component_nodes_data[comp_name]
+            if comp_data['instance_type'] in ['V','I'] and 'polarity' in comp_data:
+                 path_elements.append({'type': 'source', 'name': comp_name, 'polarity': comp_data['polarity']})
+            else:
+                 path_elements.append({'type': 'component', 'name': comp_name})
+            processed_components.add(comp_name)
+        else:
+            parallel_block_elements = []
+            for comp_name in sorted(comps_in_group):
+                parallel_block_elements.append({'type': 'component', 'name': comp_name})
+                processed_components.add(comp_name)
+            path_elements.append({'type': 'parallel_block', 'elements': parallel_block_elements})
+        
+        path_elements.append({'type': 'node', 'name': get_preferred_net_name_for_reconstruction(net2_canon, dsu, allow_implicit_if_only_option=True)})
+        
+        ast_statements.append({
+            'type': 'series_connection',
+            'path': path_elements,
+            'line': 0
+        })
+
+    # 4. Reconstruct Direct Assignments (Net Aliases)
+    all_handled_aliases = set()
+    all_canonical_representatives = dsu.get_all_canonical_representatives()
+    for canonical_rep in sorted(list(all_canonical_representatives)):
+        members = sorted(list(dsu.get_set_members(canonical_rep)))
         if len(members) > 1:
-            # The "target" of the alias should be the most preferred name in the set.
             preferred_target_name = get_preferred_net_name_for_reconstruction(
                 canonical_rep, dsu, allow_implicit_if_only_option=True
             )
-            
             for member_node in members:
-                if member_node == preferred_target_name:
-                    continue # Don't alias a node to itself
-
-                # Avoid creating aliases for internal/implicit nodes unless they are the preferred target
-                # (which is less likely if other explicit names exist in the set).
+                if member_node == preferred_target_name: continue
                 if member_node.startswith("_implicit_") and not preferred_target_name.startswith("_implicit_"):
                     continue
                 
-                # Ensure we don't add (A:B) if (B:A) using preferred_target_name logic is already handled or equivalent
-                # The key is that `member_node` will be aliased TO `preferred_target_name`.
-                # We only need to check if this specific (member_node : preferred_target_name) structure is redundant.
-                # The frozenset check ensures that once the equivalence between member_node and preferred_target_name
-                # is noted (implicitly by them being in the same DSU set and preferred_target_name being chosen),
-                # we only generate one alias statement like (non_preferred_member):(preferred_member).
-                
                 alias_pair_key = frozenset({member_node, preferred_target_name})
                 if alias_pair_key not in all_handled_aliases:
-                    # Check if this member_node itself was part of a component_connection_block as the node name
-                    # If so, an explicit alias might be redundant if the block already uses the preferred_target_name.
-                    # However, for full representation of equivalences, it might be fine.
-                    # Example: M1 { G:(node_gate) } and (node_gate):(actual_vin_signal)
-                    # The spec for this tool isn't super strict on minimizing alias statements.
-                    
                     ast_statements.append({
                         'type': 'direct_assignment',
-                        'source_node': member_node, # The "less preferred" name
-                        'target_node': preferred_target_name, # The "more preferred" name
+                        'source_node': member_node,
+                        'target_node': preferred_target_name,
                         'line': 0
                     })
                     all_handled_aliases.add(alias_pair_key)
-                            
-    # Note: The original series/parallel path reconstruction logic is omitted here.
-    # For the given test case, connection blocks + aliases are sufficient and more accurate.
-    # A full series/parallel reconstruction would need to be careful not to re-process
-    # components already handled by blocks and correctly identify 2-terminal components.
-    # That part of graph_to_structured_ast was the source of the arity errors for M1, M2, M3.
-
+                    
     return ast_statements

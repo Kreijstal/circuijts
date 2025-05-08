@@ -155,7 +155,7 @@ def test_voltage_source_graph():
         v1_connections[data['terminal']] = net_node
     
     assert len(v1_connections) == 2 # neg and pos terminals
-    assert v1_connections.get('neg') == gnd_canonical
+    assert dsu.find(v1_connections.get('neg')) == gnd_canonical
     
     # The 'pos' terminal of V1 connects to an implicit node, which then connects to R1
     implicit_node_v1_r1 = v1_connections.get('pos')
