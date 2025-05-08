@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Pytest configuration file."""
+"""Configuration for pytest."""
 
-import pytest
 import sys
 from pathlib import Path
 

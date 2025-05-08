@@ -14,6 +14,7 @@ from circuijt.validator import ASTValidator
 # Adjust path to import from circuijt module if script is in root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
 
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -26,6 +27,7 @@ def parse_arguments():
         help="Dump intermediate AST and graph structures for debugging",
     )
     return parser.parse_args()
+
 
 def read_and_parse_circuit(args):
     circuit_parser = ProtoCircuitParser()
@@ -70,6 +72,7 @@ def validate_circuit(ast, args):
         for error in validation_errors:
             print(f"  {error}")
         print("Proceeding with short circuit detection despite these validation errors...")
+
 
 def convert_to_graph(ast, args):
     try:

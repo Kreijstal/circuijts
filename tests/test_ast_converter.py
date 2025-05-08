@@ -80,7 +80,27 @@ def test_roundtrip_conversion():
     graph, dsu = ast_to_graph(statements)
     flattened = ast_to_flattened_ast(statements, dsu)
 
-    # Debug info about flattening
+    # Debug prints
+    _debug_print_flattened(flattened)
+
+    # Step 2: Flattened -> Regular AST
+    reconstructed = flattened_ast_to_regular_ast(flattened)
+    _debug_print_reconstructed(reconstructed)
+
+    # Check parallel structure preserved
+    parallel_found = _check_parallel_structure(reconstructed)
+
+    if not parallel_found:
+        print("\nDebug - All paths in reconstructed AST:")
+        for stmt in reconstructed:
+            if stmt["type"] == "series_connection":
+                print(f"Path elements: {stmt['path']}")
+
+    assert parallel_found, "Parallel structure (R1 || C1) not preserved in reconstruction"
+
+
+def _debug_print_flattened(flattened):
+    """Helper function to print debug info about flattened AST structure."""
     print("\nFlattened AST structure:")
     print(f"Total statements: {len(flattened)}")
     for stmt in flattened:
@@ -88,9 +108,9 @@ def test_roundtrip_conversion():
         if stmt["type"] == "pin_connection":
             print(f"  {stmt['component_instance']}.{stmt['terminal']} -> {stmt['net']}")
 
-    # Step 2: Flattened -> Regular AST
-    reconstructed = flattened_ast_to_regular_ast(flattened)
 
+def _debug_print_reconstructed(reconstructed):
+    """Helper function to print debug info about reconstructed AST structure."""
     print("\nReconstructed AST structure:")
     print(f"Total statements: {len(reconstructed)}")
     for stmt in reconstructed:
@@ -108,34 +128,21 @@ def test_roundtrip_conversion():
                 elif el["type"] == "component":
                     path_desc.append(el["name"])
                 elif el["type"] == "parallel_block":
-                    components = [
-                        e["name"] for e in el["elements"] if e["type"] == "component"
-                    ]
+                    components = [e["name"] for e in el["elements"] if e["type"] == "component"]
                     path_desc.append(f"[{' || '.join(components)}]")
             print(f"  Series path: {' -- '.join(path_desc)}")
 
-    # Check parallel structure preserved
-    parallel_found = False
+
+def _check_parallel_structure(reconstructed):
+    """Helper function to verify parallel structure preservation."""
     for stmt in reconstructed:
         if stmt["type"] == "series_connection":
             for el in stmt["path"]:
                 if el["type"] == "parallel_block":
-                    components = {
-                        e["name"] for e in el["elements"] if e["type"] == "component"
-                    }
+                    components = {e["name"] for e in el["elements"] if e["type"] == "component"}
                     if components == {"R1", "C1"}:
-                        parallel_found = True
-                        break
-
-    if not parallel_found:
-        print("\nDebug - All paths in reconstructed AST:")
-        for stmt in reconstructed:
-            if stmt["type"] == "series_connection":
-                print(f"Path elements: {stmt['path']}")
-
-    assert (
-        parallel_found
-    ), "Parallel structure (R1 || C1) not preserved in reconstruction"
+                        return True
+    return False
 
 
 def test_internal_components_handling():

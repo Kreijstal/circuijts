@@ -1,4 +1,11 @@
-import pytest
+# -*- coding: utf-8 -*-
+"""Test cases for AST manipulation utilities."""
+
+from circuijt.ast_utils import (
+    find_statements_of_type,
+    find_declarations_by_type,
+    summarize_circuit_elements,
+)
 from circuijt.parser import ProtoCircuitParser
 
 
@@ -172,3 +179,106 @@ def test_complete_circuit_ast():
     parallel_series = next(s for s in series if any("elements" in p for p in s["path"]))
     parallel_block = next(p for p in parallel_series["path"] if "elements" in p)
     assert len(parallel_block["elements"]) == 2
+
+
+def test_find_parallel_block():
+    """Test finding parallel blocks in AST."""
+    code = """
+    ; Declarations
+    Nmos M1
+    R R_load
+    C C_bypass
+    V V_in
+
+    ; Device connections
+    M1 { S:(GND), B:(GND) }
+
+    ; Input path
+    (GND) -- V_in(-+) -- (M1.G)
+
+    ; Output path with parallel load
+    (M1.D) -- [ R_load || C_bypass ] -- (GND)
+    """
+
+    parser = ProtoCircuitParser()
+    statements, errors = parser.parse_text(code)
+    assert not errors
+
+    # Find parallel blocks
+    parallel_blocks = find_statements_of_type(statements, "parallel_block")
+    assert len(parallel_blocks) == 1
+
+    block = parallel_blocks[0]
+    assert block["type"] == "parallel_block"
+
+    # Check contained elements
+    elements = block["elements"]
+    assert len(elements) == 2
+    assert elements[0]["type"] == "component"
+    assert elements[0]["name"] == "R_load"
+    assert elements[1]["type"] == "component"
+    assert elements[1]["name"] == "C_bypass"
+
+
+def test_find_declarations_by_type():
+    """Test finding declarations by component type."""
+    code = """
+    ; Declarations
+    Nmos M1
+    R R_load
+    C C_bypass
+    V V_in
+    """
+
+    parser = ProtoCircuitParser()
+    statements, errors = parser.parse_text(code)
+    assert not errors
+
+    # Find declarations
+    nmos_decls = find_declarations_by_type(statements, "Nmos")
+    assert len(nmos_decls) == 1
+    assert nmos_decls[0]["instance_name"] == "M1"
+
+    res_decls = find_declarations_by_type(statements, "R")
+    assert len(res_decls) == 1
+    assert res_decls[0]["instance_name"] == "R_load"
+
+    cap_decls = find_declarations_by_type(statements, "C")
+    assert len(cap_decls) == 1
+    assert cap_decls[0]["instance_name"] == "C_bypass"
+
+    volt_decls = find_declarations_by_type(statements, "V")
+    assert len(volt_decls) == 1
+    assert volt_decls[0]["instance_name"] == "V_in"
+
+
+def test_summarize_circuit_elements():
+    """Test circuit element summary."""
+    code = """
+    ; Declarations
+    Nmos M1
+    R R_load
+    C C_bypass
+    V V_in
+
+    ; Device connections
+    M1 { S:(GND), B:(GND) }
+
+    ; Input path
+    (GND) -- V_in(-+) -- (M1.G)
+
+    ; Output path with parallel load
+    (M1.D) -- [ R_load || C_bypass ] -- (GND)
+    """
+
+    parser = ProtoCircuitParser()
+    statements, errors = parser.parse_text(code)
+    assert not errors
+
+    summary = summarize_circuit_elements(statements)
+    assert summary["total_components"] == 4
+    assert summary["total_nmos"] == 1
+    assert summary["total_resistors"] == 1
+    assert summary["total_capacitors"] == 1
+    assert summary["total_voltages"] == 1
+    assert summary["total_parallel_blocks"] == 1
