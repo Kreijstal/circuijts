@@ -37,7 +37,9 @@ class ASTValidator:
             dev_part, term_part = node_name.split(".", 1)
             if dev_part not in self.declared_component_types:
                 self._add_error(
-                    f"Node '{node_name}' (terminal '{term_part}') refers to undeclared component instance '{dev_part}'. Declare '{dev_part}' first.",
+                    f"Node '{node_name}' (terminal '{term_part}') refers to "
+                    f"undeclared component instance '{dev_part}'. "
+                    f"Declare '{dev_part}' first.",
                     line_num,
                 )
                 return False  # Component not declared
@@ -71,7 +73,8 @@ class ASTValidator:
                     )
                 elif comp_type not in self.VALID_COMPONENT_TYPES:
                     self._add_error(
-                        f"Unknown component type '{comp_type}' for instance '{inst_name}'. Valid types: {sorted(list(self.VALID_COMPONENT_TYPES))}",
+                        f"Unknown component type '{comp_type}' for instance '{inst_name}'. "
+                        f"Valid types: {sorted(list(self.VALID_COMPONENT_TYPES))}",
                         line_num,
                     )
 
@@ -137,7 +140,9 @@ class ASTValidator:
                         and len(stmt["connections"]) > expected_arity
                     ):
                         self._add_error(
-                            f"Component '{comp_name}' of type '{comp_type_from_decl}' in connection block defines {len(stmt['connections'])} terminals, exceeding its arity of {expected_arity}.",
+                            f"Component '{comp_name}' of type '{comp_type_from_decl}' "
+                            f"in connection block defines {len(stmt['connections'])} "
+                            f"terminals, exceeding its arity of {expected_arity}.",
                             line_num,
                         )
 
@@ -178,13 +183,17 @@ class ASTValidator:
                     )
                     continue
 
-                is_structurally_valid_path = len(path) > 1 or (
-                    len(path) == 1 and path[0].get("type") not in ["node", "error"]
+                is_structurally_valid_path = (
+                    len(path) > 1 or
+                    (len(path) == 1 and
+                     path[0].get("type") not in ["node", "error"])
                 )
                 if not is_structurally_valid_path and path:
                     first_el_info = path[0].get("name", str(path[0]))
                     self._add_error(
-                        f"Series path '{stmt.get('_path_str', 'N/A')}' is too simple (e.g., just node '{first_el_info}'). Must connect points or include a component/source.",
+                        f"Series path '{stmt.get('_path_str', 'N/A')}' is too simple "
+                        f"(e.g., just node '{first_el_info}'). Must connect points "
+                        f"or include a component/source.",
                         line_num,
                     )
 
@@ -192,7 +201,8 @@ class ASTValidator:
                     item_type = item.get("type")
                     if item_type == "error":
                         self._add_error(
-                            f"Path segment '{item.get('message', 'unknown error')}' from '{stmt.get('_path_str', 'N/A')}' error.",
+                            f"Path segment '{item.get('message', 'unknown error')}' "
+                            f"from '{stmt.get('_path_str', 'N/A')}' error.",
                             line_num,
                         )
                         continue
@@ -220,10 +230,9 @@ class ASTValidator:
                                 line_num,
                             )
                         else:
-                            decl_type = self.declared_component_types[source_name][
-                                "type"
-                            ]
-                            # Allow any declared type for a source in path, specific type checks (e.g. 'V' for voltage) can be more semantic
+                            _ = self.declared_component_types[source_name]["type"]  # noqa: F841
+                            # TODO: Allow any declared type for a source in path for now,
+                            # but in the future add specific type checks (e.g. 'V' for voltage)
                             # For now, just ensure it's declared.
                             pass
 
@@ -235,7 +244,8 @@ class ASTValidator:
                             )
                         if i > 0 and path[i - 1]["type"] in ["named_current", "error"]:
                             self._add_error(
-                                f"Named current '{item['direction']}{item['name']}' preceded by invalid element '{path[i-1]['type']}'.",
+                                f"Named current '{item['direction']}{item['name']}' "
+                                f"preceded by invalid element '{path[i-1]['type']}'.",
                                 line_num,
                             )
                         if i < len(path) - 1 and path[i + 1]["type"] in [
@@ -243,7 +253,8 @@ class ASTValidator:
                             "error",
                         ]:
                             self._add_error(
-                                f"Named current '{item['direction']}{item['name']}' followed by invalid element '{path[i+1]['type']}'.",
+                                f"Named current '{item['direction']}{item['name']}' "
+                                f"followed by invalid element '{path[i+1]['type']}'.",
                                 line_num,
                             )
 
@@ -268,7 +279,8 @@ class ASTValidator:
                                 "noise_source",
                             ]:
                                 self._add_error(
-                                    f"Invalid type '{pel_type}' in parallel block. Allowed: component, controlled_source, noise_source.",
+                                    f"Invalid type '{pel_type}' in parallel block. "
+                                    f"Allowed: component, controlled_source, noise_source.",
                                     line_num,
                                 )
                             elif pel_type == "component":
@@ -352,7 +364,9 @@ class GraphValidator:
 
             if actual_distinct_terminals_connected > expected_arity:
                 self._add_error(
-                    f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) has {actual_distinct_terminals_connected} distinct terminals connected, exceeding its defined arity of {expected_arity}.",
+                    f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) "
+                    f"has {actual_distinct_terminals_connected} distinct terminals connected, "
+                    f"exceeding its defined arity of {expected_arity}.",
                     comp_name,
                 )
             elif (
@@ -362,11 +376,13 @@ class GraphValidator:
                 # Only raise if the component is actually connected to something but not fully
                 # An unconnected declared component is a different kind of issue (or not an issue)
                 self._add_error(
-                    f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) is not fully connected. Expected arity {expected_arity}, but only {actual_distinct_terminals_connected} distinct terminals are connected.",
+                    f"Component '{comp_name}' (type '{comp_type}', declared L{line_num}) "
+                    f"is not fully connected. Expected arity {expected_arity}, but only "
+                    f"{actual_distinct_terminals_connected} distinct terminals are connected.",
                     comp_name,
                 )
 
-            # Future graph-specific checks can be added here:
+            # TODO: Future graph-specific checks:
             # - Check for components with fewer connections than expected (e.g., arity 2 component with only 1 connection)
             # - Check for floating nets or components not part of the main circuit (if desired)
 

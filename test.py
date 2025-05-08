@@ -7,7 +7,6 @@ from circuijt.ast_utils import summarize_circuit_elements, generate_proto_from_a
 from circuijt.graph_utils import (
     ast_to_graph,
     graph_to_structured_ast,
-    DSU,
     get_preferred_net_name_for_reconstruction,
     get_component_connectivity,
 )
@@ -268,7 +267,9 @@ def generate_nmos_small_signal_model_ast(
         if not original_s_net:
             missing_terms.append("'S'")
         print(
-            f"Warning: Small-signal model D-S path for {nmos_original_instance_name} cannot be fully generated. Missing external net(s) for terminal(s): {', '.join(missing_terms)}."
+            f"Warning: Small-signal model D-S path for {nmos_original_instance_name} "
+            f"cannot be fully generated. Missing external net(s) for terminal(s): "
+            f"{', '.join(missing_terms)}."
         )
 
     return model_ast_statements

@@ -5,11 +5,9 @@ Creates output in a 'small_signal_models' subdirectory.
 """
 
 import os
-import sys
 import argparse
 import pprint  # Added for debug dumping
 from circuijt.parser import ProtoCircuitParser
-from circuijt.validator import CircuitValidator
 from circuijt.graph_utils import (
     ast_to_graph,
     get_component_connectivity,
@@ -71,12 +69,12 @@ def generate_nmos_small_signal_model(nmos_name, external_nets_map):
         "component_type": "Nmos",
         "original_instance": nmos_name,
         "model_instance": rds_name,
-        "control_voltages": f"VGS_{id_suffix},VBS_{id_suffix}",
-        "voltage_defs": f"VGS_{id_suffix}=V({external_nets_map.get('G','G')})-V({external_nets_map.get('S','S')}),"
-        f"VBS_{id_suffix}=V({external_nets_map.get('B','B')})-V({external_nets_map.get('S','S')})",
-        "connections": f"{external_nets_map.get('B','B')}:GND,"
-        f"{external_nets_map.get('D','D')}:[{gm_expr}||{gmb_expr}||{rds_name}],"
-        f"{external_nets_map.get('S','S')}",
+        "control_voltages": f"VGS_{id_suffix}, VBS_{id_suffix}",
+        "voltage_defs": f"VGS_{id_suffix}=V({external_nets_map.get('G', 'G')})-V({external_nets_map.get('S', 'S')}), "
+        f"VBS_{id_suffix}=V({external_nets_map.get('B', 'B')})-V({external_nets_map.get('S', 'S')})",
+        "connections": f"{external_nets_map.get('B', 'B')}:GND, "
+        f"{external_nets_map.get('D', 'D')}:[{gm_expr}||{gmb_expr}||{rds_name}], "
+        f"{external_nets_map.get('S', 'S')}",
     }
 
 
@@ -141,12 +139,12 @@ def generate_pmos_small_signal_model(pmos_name, external_nets_map):
         "component_type": "Pmos",
         "original_instance": pmos_name,
         "model_instance": rds_name,
-        "control_voltages": f"VSG_{id_suffix},VSB_{id_suffix}",  # VSG instead of VGS for PMOS
-        "voltage_defs": f"VSG_{id_suffix}=V({external_nets_map.get('S','S')})-V({external_nets_map.get('G','G')}),"
-        f"VSB_{id_suffix}=V({external_nets_map.get('S','S')})-V({external_nets_map.get('B','B')})",
-        "connections": f"{external_nets_map.get('B','B')}:VDD,"
-        f"{external_nets_map.get('D','D')}:[{gm_expr}||{gmb_expr}||{rds_name}],"
-        f"{external_nets_map.get('S','S')}",
+        "control_voltages": f"VSG_{id_suffix}, VSB_{id_suffix}",  # VSG instead of VGS for PMOS
+        "voltage_defs": f"VSG_{id_suffix}=V({external_nets_map.get('S', 'S')})-V({external_nets_map.get('G', 'G')}), "
+        f"VSB_{id_suffix}=V({external_nets_map.get('S', 'S')})-V({external_nets_map.get('B', 'B')})",
+        "connections": f"{external_nets_map.get('B', 'B')}:VDD, "
+        f"{external_nets_map.get('D', 'D')}:[{gm_expr}||{gmb_expr}||{rds_name}], "
+        f"{external_nets_map.get('S', 'S')}",
     }
 
 

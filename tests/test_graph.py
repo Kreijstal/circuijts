@@ -1,8 +1,5 @@
-import pytest
 from circuijt.parser import ProtoCircuitParser
 from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
-
-# from circuijt.validator import CircuitValidator # Not strictly needed for these graph tests
 
 
 def test_simple_series_graph():
@@ -300,7 +297,7 @@ def test_complex_circuit_graph():
     R Rs
     C Cgs
     V Vin
-    
+
     M1 { G:(node_g), B:(GND) }
     (GND) -- Vin(-+) -- (node_g)
     (VDD) -- Rd -- (node_d) -- [ gm1*vgs1 (->) || Cgs ] -- (GND)
@@ -421,10 +418,10 @@ def test_voltage_source_polarity_variations():
             v_rev_connections[data["terminal"]] = net_node
         assert (
             v_rev_connections.get("pos") == n3_c
-        ), f"V_rev pos expected {n3_c}, got {v_rev_connections.get('pos')}"
+        ), "V_rev pos expected {}, got {}".format(n3_c, v_rev_connections.get("pos"))
         assert (
             v_rev_connections.get("neg") == n4_c
-        ), f"V_rev neg expected {n4_c}, got {v_rev_connections.get('neg')}"
+        ), "V_rev neg expected {}, got {}".format(n4_c, v_rev_connections.get("neg"))
 
         # Check R1 and R2 connections to ensure graph integrity
         assert graph.has_edge("R1", n2_c) or graph.has_edge(n2_c, "R1")
@@ -504,85 +501,75 @@ def test_no_duplicate_parallel_elements():
         raise e
 
 
-def test_graph_to_ast_conversion():
-    """Test converting graph back to AST structure"""
+def _setup_graph_conversion_test():
+    """Helper function to set up basic circuit for graph conversion tests"""
     parser = ProtoCircuitParser()
     original_circuit = """
     R R1
     C C1
     (in) -- R1 -- (mid) -- C1 -- (GND)
     """
-    try:
-        statements, errors = parser.parse_text(original_circuit)
-        assert not errors, f"Parser failed with errors: {errors}"
+    statements, errors = parser.parse_text(original_circuit)
+    assert not errors, f"Parser failed with errors: {errors}"
+    return original_circuit, statements
 
-        # Convert to graph
-        graph, dsu = ast_to_graph(statements)
 
-        # Print graph state for debugging
-        print("\nGraph state before reconstruction:")
-        print(f"Nodes: {[n for n in graph.nodes()]}")
-        print(f"Edges: {[(u,v,d) for u,v,d in graph.edges(data=True)]}")
-        print(f"Net equivalences (DSU): {[(n, dsu.find(n)) for n in dsu.parent]}")
+def test_graph_to_ast_basic_structure():
+    """Test basic graph to AST conversion structure"""
+    _, statements = _setup_graph_conversion_test()
 
-        # Convert back to AST
-        reconstructed_ast = graph_to_structured_ast(graph, dsu)
+    # Convert to graph
+    graph, dsu = ast_to_graph(statements)
+    reconstructed_ast = graph_to_structured_ast(graph, dsu)
 
-        # Print reconstructed AST for debugging
-        print("\nReconstructed AST:")
-        for stmt in reconstructed_ast:
-            print(f"Statement type: {stmt['type']}")
-            if stmt["type"] == "declaration":
-                print(
-                    f"  Declaration: {stmt['component_type']} {stmt['instance_name']}"
-                )
-            elif stmt["type"] == "series_connection":
-                path_desc = []
-                for el in stmt["path"]:
-                    if el["type"] == "node":
-                        path_desc.append(f"({el['name']})")
-                    elif el["type"] == "component":
-                        path_desc.append(el["name"])
-                print(f"  Series path: {' -- '.join(path_desc)}")
+    # Verify basic structure
+    assert reconstructed_ast, "Reconstructed AST should not be empty"
+    assert isinstance(reconstructed_ast, list), "Reconstructed AST should be a list"
 
-        # Verify essential elements are preserved
-        decls = [s for s in reconstructed_ast if s["type"] == "declaration"]
-        assert (
-            len(decls) == 2
-        ), f"Expected 2 declarations (R1, C1), found {len(decls)}: {decls}"
 
-        series_connections_found = [
-            s for s in reconstructed_ast if s["type"] == "series_connection"
-        ]
-        # The reconstruction might create two series paths: (in)--R1--(mid) and (mid)--C1--(GND)
-        # or one combined path depending on graph_to_structured_ast logic.
-        # A simple check is that the components are part of some series connection.
-        assert (
-            len(series_connections_found) > 0
-        ), f"No series connections found in reconstructed AST. Full AST: {reconstructed_ast}"
+def test_graph_to_ast_declarations():
+    """Test that declarations are properly preserved in graph to AST conversion"""
+    _, statements = _setup_graph_conversion_test()
 
-        components_in_reconstructed_series = set()
-        for s_conn in series_connections_found:
-            for element in s_conn["path"]:
-                if element.get("type") == "component":
-                    components_in_reconstructed_series.add(element["name"])
-                elif (
-                    element.get("type") == "parallel_block"
-                ):  # Handle components inside parallel blocks too
-                    for pel in element.get("elements", []):
-                        if pel.get("type") == "component":
-                            components_in_reconstructed_series.add(pel["name"])
+    graph, dsu = ast_to_graph(statements)
+    reconstructed_ast = graph_to_structured_ast(graph, dsu)
 
-        missing_comps = {"R1", "C1"} - components_in_reconstructed_series
-        assert (
-            not missing_comps
-        ), f"Components missing from series connections: {missing_comps}. Found: {components_in_reconstructed_series}. Full AST: {reconstructed_ast}"
-    except AssertionError as e:
-        print("\\n--- Test Failed: test_graph_to_ast_conversion ---")
-        print(f"Original circuit:\\n{original_circuit}")
-        print(f"Parser errors: {errors}")
-        print(f"Graph nodes: {list(graph.nodes(data=True))}")
-        print(f"Graph edges: {list(graph.edges(data=True))}")
-        print(f"DSU parents: {dsu.parent}")
-        print(f"Reconstructed AST: {reconstructed_ast}")
-        raise e
+    # Verify declarations
+    decls = [s for s in reconstructed_ast if s["type"] == "declaration"]
+    err_msg = f"Expected 2 declarations (R1, C1), found {len(decls)}: {decls}"
+    assert len(decls) == 2, err_msg
+
+    # Check specific components are declared
+    component_types = {(d["component_type"], d["instance_name"]) for d in decls}
+    assert ("R", "R1") in component_types, "Missing R1 declaration"
+    assert ("C", "C1") in component_types, "Missing C1 declaration"
+
+
+def test_graph_to_ast_connections():
+    """Test that component connections are properly preserved in graph to AST conversion"""
+    _, statements = _setup_graph_conversion_test()
+
+    graph, dsu = ast_to_graph(statements)
+    reconstructed_ast = graph_to_structured_ast(graph, dsu)
+
+    # Verify series connections
+    series_connections = [s for s in reconstructed_ast if s["type"] == "series_connection"]
+    assert series_connections, "No series connections found in reconstructed AST"
+
+    # Check all components are present in connections
+    components_in_series = set()
+    for conn in series_connections:
+        for element in conn["path"]:
+            if element.get("type") == "component":
+                components_in_series.add(element["name"])
+            elif element.get("type") == "parallel_block":
+                for pel in element.get("elements", []):
+                    if pel.get("type") == "component":
+                        components_in_series.add(pel["name"])
+
+    missing_comps = {"R1", "C1"} - components_in_series
+    err_msg = (
+        f"Components missing from series connections: {missing_comps}. "
+        f"Found: {components_in_series}"
+    )
+    assert not missing_comps, err_msg

@@ -59,7 +59,8 @@ class ProtoCircuitParser:
             name, polarity = match_source.groups()
             if not self.COMPONENT_NAME_RE.fullmatch(name):
                 self.errors.append(
-                    f"L{line_num}: Invalid source instance name format '{name}'. Must be alphanumeric, starting with letter/underscore."
+                    f"L{line_num}: Invalid source instance name format '{name}'. "
+                    f"Must be alphanumeric, starting with letter/underscore."
                 )
                 return {
                     "type": "error",
@@ -79,7 +80,8 @@ class ProtoCircuitParser:
                 direction, name = match_current.groups()
                 if not self.COMPONENT_NAME_RE.fullmatch(name):
                     self.errors.append(
-                        f"L{line_num}: Invalid current identifier '{name}'. Must be alphanumeric, starting with letter/underscore."
+                        f"L{line_num}: Invalid current identifier '{name}'. "
+                        f"Must be alphanumeric, starting with letter/underscore."
                     )
                     return {
                         "type": "error",
@@ -109,7 +111,8 @@ class ProtoCircuitParser:
                 else:  # Assume noise_id
                     if not self.COMPONENT_NAME_RE.fullmatch(expr_id):
                         self.errors.append(
-                            f"L{line_num}: Invalid noise source identifier '{expr_id}'. Must be alphanumeric, starting with letter/underscore."
+                            f"L{line_num}: Invalid noise source identifier '{expr_id}'. "
+                            f"Must be alphanumeric, starting with letter/underscore."
                         )
                         return {
                             "type": "error",
@@ -167,11 +170,13 @@ class ProtoCircuitParser:
             comp_type, inst_name = match_decl.groups()
             if not self.COMPONENT_NAME_RE.fullmatch(comp_type):
                 self.errors.append(
-                    f"L{line_num}: Invalid component type format '{comp_type}'. Must be alphanumeric, starting with letter/underscore."
+                    f"L{line_num}: Invalid component type format '{comp_type}'. "
+                    f"Must be alphanumeric, starting with letter/underscore."
                 )
             if not self.COMPONENT_NAME_RE.fullmatch(inst_name):
                 self.errors.append(
-                    f"L{line_num}: Invalid component instance name format '{inst_name}'. Must be alphanumeric, starting with letter/underscore."
+                    f"L{line_num}: Invalid component instance name format '{inst_name}'. "
+                    f"Must be alphanumeric, starting with letter/underscore."
                 )
             self.parsed_statements.append(
                 {
@@ -217,11 +222,13 @@ class ProtoCircuitParser:
                     valid_assignments_found_in_block = True
                 else:
                     self.errors.append(
-                        f"L{line_num}: Malformed assignment '{assign_part}' in component block for '{comp_name}'. Expected 'Terminal:(NodeName)'."
+                        f"L{line_num}: Malformed assignment '{assign_part}' in "
+                        f"component block for '{comp_name}'. Expected 'Terminal:(NodeName)'."
                     )
             if assignments_str.strip() and not valid_assignments_found_in_block:
                 self.errors.append(
-                    f"L{line_num}: Component block for '{comp_name}' ('{assignments_str.strip()}') had no valid 'Terminal:(NodeName)' assignments."
+                    f"L{line_num}: Component block for '{comp_name}' "
+                    f"('{assignments_str.strip()}') had no valid 'Terminal:(NodeName)' assignments."
                 )
             self.parsed_statements.append(
                 {
@@ -287,7 +294,9 @@ class ProtoCircuitParser:
 
                 if first_part_parsed.get("type") != "node":
                     self.errors.append(
-                        f"L{line_num}: Series path must start with a node. Found '{first_element_str}' (parsed as type '{first_part_parsed.get('type', 'unknown')}')."
+                        f"L{line_num}: Series path must start with a node. "
+                        f"Found '{first_element_str}' (parsed as type "
+                        f"'{first_part_parsed.get('type', 'unknown')}')."
                     )
                     self.parsed_statements.append(
                         {

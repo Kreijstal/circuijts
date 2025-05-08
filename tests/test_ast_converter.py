@@ -158,7 +158,7 @@ def test_internal_components_handling():
 
     print("\nGraph structure:")
     print(f"Nodes: {[n for n in graph.nodes()]}")
-    print(f"Edges: {[(u,v,d) for u,v,d in graph.edges(data=True)]}")
+    print(f"Edges: {[(u, v, d) for u, v, d in graph.edges(data=True)]}")
 
     flattened = ast_to_flattened_ast(statements, dsu)
 

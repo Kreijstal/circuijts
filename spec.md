@@ -28,7 +28,7 @@ This document specifies a simple textual format for describing electronic circui
 *   **Components:**
     *   Represented by their declared `InstanceName` (e.g., `Cf`, `Cfb`, `rds1`, `CL`, `R1`, `M1`).
     *   All components must be declared using the `Type InstanceName` syntax (see Component Declarations).
-    *   Component values or parameters are not typically specified directly in the connection string but assumed to be known from context, comments, or potentially future extensions to the declaration syntax (e.g., `R R1 1k`).
+    *   Component values or parameters are not typically specified directly in the connection string but assumed to be known from context, comments, or TODO: potential future extensions to the declaration syntax (e.g., `R R1 1k`).
 *   **Component Connection Block (`{}`):**
     *   Provides a concise way to define multiple direct connections for a single component instance.
     *   Format: `InstanceName { Terminal1:(NodeA), Terminal2:(NodeB), ... }`

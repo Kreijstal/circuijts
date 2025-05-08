@@ -1,4 +1,3 @@
-import pytest
 from circuijt.parser import ProtoCircuitParser
 
 
@@ -155,10 +154,10 @@ def test_complete_circuit():
 
     ; Device connections
     M1 { S:(GND), B:(GND) }
-    
+
     ; Input path
     (GND) -- V_in(-+) -- (M1.G)
-    
+
     ; Output path with parallel load
     (M1.D) -- [ R_load || C_bypass ] -- (GND)
     """

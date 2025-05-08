@@ -428,20 +428,17 @@ def ast_to_graph(parsed_statements):
                     implicit_node_idx += 1
 
                 elif item_type == "named_current":
-                    # Named currents are annotations on connections.
+                    # TODO: Named currents are annotations on connections.
                     # This requires identifying the specific edge representing the "wire segment".
                     # For example, if path[i-1] was a component C, and it connected to
                     # current_attach_point_canonical via terminal T_prev of C.
-                    # The edge (C_node, current_attach_point_canonical) with terminal=T_prev
-                    # would get an attribute for this named current.
                     # This is advanced and depends on precise edge identification.
                     # For now, we'll skip adding it directly to the graph's structure
                     # but it could be added as an attribute to current_attach_point_canonical
                     # or the component connected *before* the current, if identifiable.
-                    # print(f"AST_TO_GRAPH_INFO: Named current '{item['name']}' encountered, representation in graph TBD.")
                     pass
 
-    # Optional: Create a "cleaner" graph where all net nodes are guaranteed to be their canonical names
+    # TODO: Optional: Create a "cleaner" graph where all net nodes are guaranteed to be their canonical names
     # This involves relabeling or creating a new graph.
     # For now, the existing graph G uses canonical names for edges, but some non-canonical
     # net nodes might exist if they were added before all unions were processed.
