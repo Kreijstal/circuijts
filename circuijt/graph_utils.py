@@ -215,59 +215,89 @@ def _handle_series_connection(
     # Process remaining path elements
     for i in range(1, len(path)):
         item = path[i]
-        item_type = item.get("type")
-
-        if item_type == "node":
-            node_name = item["name"]
-            current_attach_point = electrical_nets_dsu.find(node_name)
-            if not G.has_node(current_attach_point):
-                G.add_node(current_attach_point, node_kind="electrical_net")
-            if "." in node_name:
-                comp_part, term_part = node_name.split(".", 1)
-                if comp_part in declared_components:
-                    G.add_edge(comp_part, current_attach_point, terminal=term_part)
-            continue
-
-        # Determine next attach point
-        next_attach_point = None
-        created_new_implicit_node = False
-
-        if i + 1 < len(path) and path[i + 1].get("type") == "node":
-            next_node_name = path[i + 1]["name"]
-            next_attach_point = electrical_nets_dsu.find(next_node_name)
-        else:
-            implicit_node_name = f"_implicit_{implicit_node_idx}"
-            next_attach_point = electrical_nets_dsu.find(implicit_node_name)
-            if not G.has_node(next_attach_point):
-                created_new_implicit_node = True
-
-        if next_attach_point and not G.has_node(next_attach_point):
-            G.add_node(next_attach_point, node_kind="electrical_net")
-
-        # Handle different item types
-        if item_type == "component":
-            _handle_series_component(
-                G, item, declared_components, current_attach_point, next_attach_point
-            )
-        elif item_type == "source":
-            _handle_series_source(
-                G, item, declared_components, current_attach_point, next_attach_point
-            )
-        elif item_type == "parallel_block":
-            internal_component_idx = _handle_parallel_block(
+        current_attach_point, implicit_node_idx, internal_component_idx = (
+            _process_series_path_item(
                 G,
                 item,
+                path,
+                i,
                 declared_components,
+                electrical_nets_dsu,
                 current_attach_point,
-                next_attach_point,
+                implicit_node_idx,
                 internal_component_idx,
             )
-
-        current_attach_point = next_attach_point
-        if created_new_implicit_node:
-            implicit_node_idx += 1
+        )
 
     return implicit_node_idx, internal_component_idx
+
+
+def _process_series_path_item(
+    G,
+    item,
+    path,
+    item_index,
+    declared_components,
+    electrical_nets_dsu,
+    current_attach_point,
+    implicit_node_idx,
+    internal_component_idx,
+):
+    """Processes a single item in a series path."""
+    item_type = item.get("type")
+
+    if item_type == "node":
+        node_name = item["name"]
+        new_attach_point = electrical_nets_dsu.find(node_name)
+        if not G.has_node(new_attach_point):
+            G.add_node(new_attach_point, node_kind="electrical_net")
+        if "." in node_name:
+            comp_part, term_part = node_name.split(".", 1)
+            if comp_part in declared_components:
+                G.add_edge(comp_part, new_attach_point, terminal=term_part)
+        return new_attach_point, implicit_node_idx, internal_component_idx
+
+    # Determine next attach point
+    next_attach_point = None
+    created_new_implicit_node = False
+
+    if item_index + 1 < len(path) and path[item_index + 1].get("type") == "node":
+        next_node_name = path[item_index + 1]["name"]
+        next_attach_point = electrical_nets_dsu.find(next_node_name)
+    else:
+        implicit_node_name = f"_implicit_{implicit_node_idx}"
+        next_attach_point = electrical_nets_dsu.find(implicit_node_name)
+        if not G.has_node(next_attach_point):  # Check before potential creation
+            created_new_implicit_node = True  # Mark for increment if used
+
+    if next_attach_point and not G.has_node(next_attach_point):
+        G.add_node(next_attach_point, node_kind="electrical_net")
+
+    # Handle different item types
+    if item_type == "component":
+        _handle_series_component(
+            G, item, declared_components, current_attach_point, next_attach_point
+        )
+    elif item_type == "source":
+        _handle_series_source(
+            G, item, declared_components, current_attach_point, next_attach_point
+        )
+    elif item_type == "parallel_block":
+        internal_component_idx = _handle_parallel_block(
+            G,
+            item,
+            declared_components,
+            current_attach_point,
+            next_attach_point,
+            internal_component_idx,
+        )
+
+    if (
+        created_new_implicit_node and next_attach_point
+    ):  # Increment only if the implicit node was actually used as next_attach_point
+        implicit_node_idx += 1
+
+    return next_attach_point, implicit_node_idx, internal_component_idx
 
 
 def _handle_series_component(

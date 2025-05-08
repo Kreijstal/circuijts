@@ -33,96 +33,84 @@ class ProtoCircuitParser:
             r"^\s*\(([a-zA-Z0-9_.]+)\)\s*:\s*\(([a-zA-Z0-9_.]+)\)"
         )
 
+    def _validate_node_name(self, node_name, line_num, element_str):
+        valid_node = re.fullmatch(
+            r"[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?", node_name
+        )
+        if not valid_node:
+            self.errors.append(
+                f"L{line_num}: Invalid node name format '{node_name}' in '{element_str}'. "
+                f"Expected (name) or (Device.Terminal)."
+            )
+            return False
+        return True
+
+    def _parse_node_element(self, match, line_num, element_str):
+        node_name = match.group(1)
+        if not self._validate_node_name(node_name, line_num, element_str):
+            return {"type": "error", "message": f"Invalid node name format: {node_name}"}
+        return {"type": "node", "name": node_name}
+
+    def _parse_source_element(self, match, line_num):
+        name, polarity = match.groups()
+        if not self.COMPONENT_NAME_RE.fullmatch(name):
+            self.errors.append(
+                f"L{line_num}: Invalid source instance name format '{name}'. "
+                f"Must be alphanumeric, starting with letter/underscore."
+            )
+            return {"type": "error", "message": f"Invalid source instance name format: {name}"}
+        return {"type": "source", "name": name, "polarity": polarity}
+
+    def _parse_named_current_element(self, match, line_num):
+        direction, name = match.groups()
+        if not self.COMPONENT_NAME_RE.fullmatch(name):
+            self.errors.append(
+                f"L{line_num}: Invalid current identifier '{name}'. "
+                f"Must be alphanumeric, starting with letter/underscore."
+            )
+            return {"type": "error", "message": f"Invalid current identifier: {name}"}
+        return {"type": "named_current", "direction": direction, "name": name}
+
+    def _parse_controlled_or_noise_source_element(self, match, line_num, element_str):
+        expr_id = match.group(1).strip()
+        direction = match.group(2)
+        if not expr_id:
+            self.errors.append(
+                f"L{line_num}: Empty expression/id for controlled/noise source in parallel block: '{element_str}'"
+            )
+            return {"type": "error", "message": "Empty expression/id for source"}
+        if "*" in expr_id:  # Assume VCCS if '*' is present
+            return {"type": "controlled_source", "expression": expr_id, "direction": direction}
+        else:  # Assume noise_id
+            if not self.COMPONENT_NAME_RE.fullmatch(expr_id):
+                self.errors.append(
+                    f"L{line_num}: Invalid noise source identifier '{expr_id}'. "
+                    f"Must be alphanumeric, starting with letter/underscore."
+                )
+                return {"type": "error", "message": f"Invalid noise source id: {expr_id}"}
+            return {"type": "noise_source", "id": expr_id, "direction": direction}
+
     def _parse_element(self, element_str, line_num, context="series"):
         # Strip any inline comments first
         element_str = self.COMMENT_RE.sub("", element_str).strip()
 
         match_node = self.NODE_RE.match(element_str)
         if match_node:
-            node_name = match_node.group(1)
-            valid_node = re.fullmatch(
-                r"[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?", node_name
-            )
-            if not valid_node:
-                self.errors.append(
-                    f"L{line_num}: Invalid node name format '{node_name}' in '{element_str}'. "
-                    f"Expected (name) or (Device.Terminal)."
-                )
-                return {
-                    "type": "error",
-                    "message": f"Invalid node name format: {node_name}",
-                }
-            return {"type": "node", "name": node_name}
+            return self._parse_node_element(match_node, line_num, element_str)
 
         match_source = self.SOURCE_RE.match(element_str)
         if match_source:
-            name, polarity = match_source.groups()
-            if not self.COMPONENT_NAME_RE.fullmatch(name):
-                self.errors.append(
-                    f"L{line_num}: Invalid source instance name format '{name}'. "
-                    f"Must be alphanumeric, starting with letter/underscore."
-                )
-                return {
-                    "type": "error",
-                    "message": f"Invalid source instance name format: {name}",
-                }
-            return {
-                "type": "source",
-                "name": name,
-                "polarity": polarity,
-            }  # Name is instance name
+            return self._parse_source_element(match_source, line_num)
 
-        if (
-            context == "series"
-        ):  # Named currents only allowed in series context by this parser logic
+        if context == "series":
             match_current = self.NAMED_CURRENT_RE.match(element_str)
             if match_current:
-                direction, name = match_current.groups()
-                if not self.COMPONENT_NAME_RE.fullmatch(name):
-                    self.errors.append(
-                        f"L{line_num}: Invalid current identifier '{name}'. "
-                        f"Must be alphanumeric, starting with letter/underscore."
-                    )
-                    return {
-                        "type": "error",
-                        "message": f"Invalid current identifier: {name}",
-                    }
-                return {"type": "named_current", "direction": direction, "name": name}
+                return self._parse_named_current_element(match_current, line_num)
 
-        if context == "parallel":  # Controlled/Noise sources only in parallel context
+        if context == "parallel":
             match_cs = self.CONTROLLED_SOURCE_RE.match(element_str)
             if match_cs:
-                expr_id = match_cs.group(1).strip()
-                direction = match_cs.group(2)
-                if not expr_id:
-                    self.errors.append(
-                        f"L{line_num}: Empty expression/id for controlled/noise source in parallel block: '{element_str}'"
-                    )
-                    return {
-                        "type": "error",
-                        "message": "Empty expression/id for source",
-                    }
-                if "*" in expr_id:  # Assume VCCS if '*' is present
-                    return {
-                        "type": "controlled_source",
-                        "expression": expr_id,
-                        "direction": direction,
-                    }
-                else:  # Assume noise_id
-                    if not self.COMPONENT_NAME_RE.fullmatch(expr_id):
-                        self.errors.append(
-                            f"L{line_num}: Invalid noise source identifier '{expr_id}'. "
-                            f"Must be alphanumeric, starting with letter/underscore."
-                        )
-                        return {
-                            "type": "error",
-                            "message": f"Invalid noise source id: {expr_id}",
-                        }
-                    return {
-                        "type": "noise_source",
-                        "id": expr_id,
-                        "direction": direction,
-                    }
+                return self._parse_controlled_or_noise_source_element(match_cs, line_num, element_str)
 
         # Default to component instance name if nothing else matches
         if self.COMPONENT_NAME_RE.fullmatch(
