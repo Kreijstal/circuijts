@@ -333,11 +333,31 @@ def flattened_ast_to_regular_ast(flattened_ast):
     return regular_ast
 
 
-def ast_to_graph(
-    parsed_statements,
-    dsu_structure=None,
-    debug=False,
-):  # pylint: disable=unused-argument
+def _process_component_connection(statement, edges):
+    """Process component connection block statements."""
+    for conn in statement["connections"]:
+        edges.append(
+            {
+                "type": "edge",
+                "source": conn["node"],
+                "target": statement["component_name"],
+                "terminal": conn["terminal"],
+            }
+        )
+
+
+def _process_series_connection_element(element, prev_node, next_node):
+    """Process an element within a series connection."""
+    if element["type"] == "component":
+        return _process_component_element(element, prev_node, next_node)
+    elif element["type"] == "source":
+        return _process_source_element(element, prev_node, next_node)
+    elif element["type"] == "parallel_block":
+        return _process_parallel_block(element, prev_node, next_node)
+    return []
+
+
+def ast_to_graph(parsed_statements, dsu_structure=None, debug=False):  # pylint: disable=unused-argument
     """Convert AST to a graph representation."""
     dsu = DSU()
 
@@ -350,27 +370,12 @@ def ast_to_graph(
     edges = []
     for statement in parsed_statements:
         if statement["type"] == "component_connection_block":
-            for conn in statement["connections"]:
-                edges.append(
-                    {
-                        "type": "edge",
-                        "source": conn["node"],
-                        "target": statement["component_name"],
-                        "terminal": conn["terminal"],
-                    }
-                )
+            _process_component_connection(statement, edges)
         elif statement["type"] == "series_connection":
             for i, element in enumerate(statement["path"]):
                 if element["type"] == "node":
                     continue
                 prev_node, next_node = _find_adjacent_nodes(statement["path"], i)
-                if element["type"] == "component":
-                    edges.extend(
-                        _process_component_element(element, prev_node, next_node)
-                    )
-                elif element["type"] == "source":
-                    edges.extend(_process_source_element(element, prev_node, next_node))
-                elif element["type"] == "parallel_block":
-                    edges.extend(_process_parallel_block(element, prev_node, next_node))
+                edges.extend(_process_series_connection_element(element, prev_node, next_node))
 
     return {"nodes": dsu.get_all(), "edges": edges}
