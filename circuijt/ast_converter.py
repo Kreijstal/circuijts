@@ -204,7 +204,20 @@ def flattened_ast_to_regular_ast(flattened_ast_statements):
             if not reconstructed_graph.has_node(comp_instance):
                 if comp_instance.startswith("_internal_"):
                      print(f"Warning: Internal component {comp_instance} found in pin_connection, type info might be missing.")
-
+                     # Attempt to add the internal component node if missing, using info from declared_components_from_flat
+                     # This can happen if the flattened AST had a pin_connection for an internal component
+                     # whose declaration wasn't processed first or was missing.
+                     if comp_instance in declared_components_from_flat:
+                         decl_info = declared_components_from_flat[comp_instance]
+                         node_attrs = {'node_kind': 'component_instance', 'instance_type': decl_info['type']}
+                         # Add other relevant attributes if they were stored in declared_components_from_flat
+                         # or if we parse them from stmt (though stmt is pin_connection here)
+                         if 'expression' in decl_info: node_attrs['expression'] = decl_info['expression'] # Assuming decl_info might hold more
+                         if 'direction' in decl_info: node_attrs['direction'] = decl_info['direction']
+                         if 'id' in decl_info: node_attrs['id'] = decl_info['id']
+                         if 'polarity' in decl_info: node_attrs['polarity'] = decl_info['polarity']
+                         reconstructed_graph.add_node(comp_instance, **node_attrs)
+ 
             reconstructed_graph.add_edge(comp_instance, canonical_net_for_connection, key=terminal, terminal=terminal)
 
             # Track component connections for parallel detection

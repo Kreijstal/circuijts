@@ -401,7 +401,11 @@ def graph_to_structured_ast(graph, dsu):
     ast_statements = []
     processed_components = set()
 
-    component_nodes_data = {n: data for n, data in graph.nodes(data=True) if data.get('node_kind') == 'component_instance'}
+    # Get all component nodes with their full attributes
+    component_nodes_data = {
+        n: graph.nodes[n] for n in graph.nodes
+        if graph.nodes[n].get('node_kind') == 'component_instance'
+    }
     all_declared_comp_names = sorted([
         n for n, data in component_nodes_data.items()
         if not n.startswith('_internal_') and data.get('instance_type')
@@ -473,7 +477,7 @@ def graph_to_structured_ast(graph, dsu):
                 if comp_type in ['V', 'I']:
                     if 'pos' in connections_map and 'neg' in connections_map:
                          valid_terminals.update(['pos', 'neg'])
-                elif comp_type in ['R', 'C', 'L']:
+                elif comp_type in ['R', 'C', 'L', 'controlled_source', 'noise_source']:
                     path_terms = {'t1_series', 't2_series', 'par_t1', 'par_t2'}
                     found_path_terms = {t for t in connections_map if t in path_terms}
                     if len(found_path_terms) == 2:
@@ -484,6 +488,11 @@ def graph_to_structured_ast(graph, dsu):
                     if nets_for_key not in net_pair_to_components:
                         net_pair_to_components[nets_for_key] = []
                     net_pair_to_components[nets_for_key].append(comp_name)
+
+    # Debug print to verify component grouping
+    print("\nDEBUG: net_pair_to_components grouping:")
+    for nets, comps in net_pair_to_components.items():
+        print(f"  Nets {nets}: Components {comps}")
 
     # Create series paths with parallel blocks
     for (net1_canon, net2_canon), comps_in_group in net_pair_to_components.items():
@@ -517,17 +526,18 @@ def graph_to_structured_ast(graph, dsu):
             for comp_name in sorted(comps_in_group):
                 comp_data = component_nodes_data[comp_name]
                 if comp_name.startswith('_internal_'):
-                    if comp_data['instance_type'] == 'controlled_source':
+                    node_data = graph.nodes[comp_name]
+                    if node_data.get('instance_type') == 'controlled_source':
                         parallel_block_elements.append({
                             'type': 'controlled_source',
-                            'expression': comp_data.get('expression', 'ERROR_NO_EXPR'),
-                            'direction': comp_data.get('direction', '->')
+                            'expression': node_data.get('expression', 'ERROR_NO_EXPR'),
+                            'direction': node_data.get('direction', '->')
                         })
-                    elif comp_data['instance_type'] == 'noise_source':
+                    elif node_data.get('instance_type') == 'noise_source':
                         parallel_block_elements.append({
                             'type': 'noise_source',
-                            'id': comp_data.get('id', 'ERROR_NO_ID'),
-                            'direction': comp_data.get('direction', '->')
+                            'id': node_data.get('id', 'ERROR_NO_ID'),
+                            'direction': node_data.get('direction', '->')
                         })
                 elif comp_data['instance_type'] in ['V','I'] and 'polarity' in comp_data:
                     parallel_block_elements.append({
