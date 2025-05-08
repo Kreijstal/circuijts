@@ -148,17 +148,8 @@ def generate_pmos_small_signal_model(pmos_name, external_nets_map):
     }
 
 
-def process_circuit_file(
-    input_file, output_dir=None, stdout=False, debug_dump=False
-):  # Added debug_dump
-    """Process a circuit file and generate small signal models."""
-    if not stdout:
-        os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(input_file))[0]
-        output_file = os.path.join(output_dir, f"{base_name}_ssm.circuijt")
-        annotation_file = os.path.join(output_dir, f"{base_name}_rules.txt")
-
-    # Parse input circuit
+def _parse_circuit_file(input_file, debug_dump=False):
+    """Parses the circuit file and returns the AST and any errors."""
     parser = ProtoCircuitParser()
     with open(input_file, "r") as f:
         circuit_text = f.read()
@@ -176,23 +167,14 @@ def process_circuit_file(
         print(f"Parser errors in {input_file}:")
         for error in errors:
             print(error)
-        # Decide whether to return or proceed. For SSM generation, errors are critical.
-        if not ast:  # If AST is empty due to errors
+        if not ast:
             print("Critical parsing errors, cannot proceed with SSM generation.")
-            return
+            return None, errors
+    return ast, errors
 
-    # Find all MOS transistors (both NMOS and PMOS)
-    graph, dsu = ast_to_graph(ast)
 
-    if debug_dump:
-        print("\n--- DEBUG DUMP: Graph Structure ---")
-        print("Nodes:")
-        pprint.pprint(list(graph.nodes(data=True)))
-        print("Edges:")
-        pprint.pprint(list(graph.edges(data=True)))
-        print("DSU Parent Map:")
-        pprint.pprint(dsu.parent)
-
+def _extract_mos_transistors(graph):
+    """Extracts NMOS and PMOS transistors from the graph."""
     nmos_transistors = [
         node
         for node, data in graph.nodes(data=True)
@@ -205,71 +187,44 @@ def process_circuit_file(
         if data.get("node_kind") == "component_instance"
         and data.get("instance_type") == "Pmos"
     ]
+    return nmos_transistors, pmos_transistors
 
-    if not nmos_transistors and not pmos_transistors:
-        print(f"No MOS transistors found in {input_file}")
-        return
 
-    # Generate small signal models
-    all_model_statements = []
+def _generate_transistor_models(transistors, graph, dsu, model_type):
+    """Generates small signal models and rule annotations for a list of transistors."""
+    model_statements = []
     rule_annotations = []
+    generator_func = (
+        generate_nmos_small_signal_model
+        if model_type == "Nmos"
+        else generate_pmos_small_signal_model
+    )
 
-    # Process NMOS transistors
-    for nmos in nmos_transistors:
-        # Get external connections
-        term_to_canonical, _ = get_component_connectivity(graph, nmos)
+    for transistor_name in transistors:
+        term_to_canonical, _ = get_component_connectivity(graph, transistor_name)
         external_nets = {
             term: get_preferred_net_name_for_reconstruction(net, dsu)
             for term, net in term_to_canonical.items()
         }
 
-        # Generate model
-        model_statements, rule_data = generate_nmos_small_signal_model(
-            nmos, external_nets
-        )
-        all_model_statements.extend(model_statements)
+        generated_statements, rule_data = generator_func(transistor_name, external_nets)
+        model_statements.extend(generated_statements)
 
-        # Format rule annotation
         rule_annotations.append(
-            f"[{nmos} Small Signal Model]\n"
-            f"Original: {nmos} with connections {external_nets}\n"
+            f"[{transistor_name} Small Signal Model]\n"
+            f"Original: {transistor_name} with connections {external_nets}\n"
             f"Model: {rule_data}\n"
             "----------------------------------------\n"
         )
+    return model_statements, rule_annotations
 
-    # Process PMOS transistors
-    for pmos in pmos_transistors:
-        # Get external connections
-        term_to_canonical, _ = get_component_connectivity(graph, pmos)
-        external_nets = {
-            term: get_preferred_net_name_for_reconstruction(net, dsu)
-            for term, net in term_to_canonical.items()
-        }
 
-        # Generate model
-        model_statements, rule_data = generate_pmos_small_signal_model(
-            pmos, external_nets
-        )
-        all_model_statements.extend(model_statements)
+def _write_output_files(
+    input_file, output_dir, all_model_statements, rule_annotations, stdout
+):
+    """Writes the generated model and annotation rules to files or stdout."""
+    from circuijt.ast_utils import generate_proto_from_ast  # Local import
 
-        # Format rule annotation
-        rule_annotations.append(
-            f"[{pmos} Small Signal Model]\n"
-            f"Original: {pmos} with connections {external_nets}\n"
-            f"Model: {rule_data}\n"
-            "----------------------------------------\n"
-        )
-
-    if debug_dump:
-        print(
-            "\n--- DEBUG DUMP: Generated Small-Signal Model AST (all_model_statements) ---"
-        )
-        pprint.pprint(all_model_statements)
-
-    # Convert AST to circuit code
-    from circuijt.ast_utils import generate_proto_from_ast
-
-    # Write output
     if stdout:
         print("; Small Signal Model Generated Automatically")
         print(f"; Original circuit: {input_file}\n")
@@ -279,18 +234,75 @@ def process_circuit_file(
         print("======================================")
         print("".join(rule_annotations))
     else:
-        with open(output_file, "w") as f:
+        os.makedirs(output_dir, exist_ok=True)
+        base_name = os.path.splitext(os.path.basename(input_file))[0]
+        output_file_path = os.path.join(output_dir, f"{base_name}_ssm.circuijt")
+        annotation_file_path = os.path.join(output_dir, f"{base_name}_rules.txt")
+
+        with open(output_file_path, "w") as f:
             f.write("; Small Signal Model Generated Automatically\n")
             f.write(f"; Original circuit: {input_file}\n\n")
             f.write(generate_proto_from_ast(all_model_statements))
 
-        with open(annotation_file, "w") as f:
+        with open(annotation_file_path, "w") as f:
             f.write("Small Signal Model Transformation Rules\n")
             f.write("======================================\n\n")
             f.writelines(rule_annotations)
 
-        print(f"Generated small signal model in {output_file}")
-        print(f"Transformation rules saved to {annotation_file}")
+        print(f"Generated small signal model in {output_file_path}")
+        print(f"Transformation rules saved to {annotation_file_path}")
+
+
+def process_circuit_file(
+    input_file, output_dir=None, stdout=False, debug_dump=False
+):  # Added debug_dump
+    """Process a circuit file and generate small signal models."""
+    ast, errors = _parse_circuit_file(input_file, debug_dump)
+    if not ast:
+        return
+
+    graph, dsu = ast_to_graph(ast)
+    if debug_dump:
+        print("\n--- DEBUG DUMP: Graph Structure ---")
+        print("Nodes:")
+        pprint.pprint(list(graph.nodes(data=True)))
+        print("Edges:")
+        pprint.pprint(list(graph.edges(data=True)))
+        print("DSU Parent Map:")
+        pprint.pprint(dsu.parent)
+
+    nmos_transistors, pmos_transistors = _extract_mos_transistors(graph)
+
+    if not nmos_transistors and not pmos_transistors:
+        print(f"No MOS transistors found in {input_file}")
+        return
+
+    all_model_statements = []
+    all_rule_annotations = []
+
+    if nmos_transistors:
+        nmos_models, nmos_rules = _generate_transistor_models(
+            nmos_transistors, graph, dsu, "Nmos"
+        )
+        all_model_statements.extend(nmos_models)
+        all_rule_annotations.extend(nmos_rules)
+
+    if pmos_transistors:
+        pmos_models, pmos_rules = _generate_transistor_models(
+            pmos_transistors, graph, dsu, "Pmos"
+        )
+        all_model_statements.extend(pmos_models)
+        all_rule_annotations.extend(pmos_rules)
+
+    if debug_dump:
+        print(
+            "\n--- DEBUG DUMP: Generated Small-Signal Model AST (all_model_statements) ---"
+        )
+        pprint.pprint(all_model_statements)
+
+    _write_output_files(
+        input_file, output_dir, all_model_statements, all_rule_annotations, stdout
+    )
 
 
 def main():
