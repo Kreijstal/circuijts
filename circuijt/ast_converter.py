@@ -175,8 +175,27 @@ def flattened_ast_to_regular_ast(flattened_ast_statements):
         if stmt['type'] == 'declaration':
             comp_type = stmt['component_type']
             inst_name = stmt['instance_name']
-            reconstructed_graph.add_node(inst_name, node_kind='component_instance', instance_type=comp_type)
-            declared_components_from_flat[inst_name] = {'type': comp_type, 'line': stmt.get('line',0)}
+            
+            attrs_for_graph_node = {
+                'node_kind': 'component_instance',
+                'instance_type': comp_type,
+                'line': stmt.get('line', 0)
+            }
+            # For internal components, copy over behavioral attributes
+            if inst_name.startswith("_internal_"):
+                attrs_for_graph_node['internal'] = True
+                if 'expression' in stmt: attrs_for_graph_node['expression'] = stmt['expression']
+                if 'direction' in stmt: attrs_for_graph_node['direction'] = stmt['direction']
+                if 'id' in stmt: attrs_for_graph_node['id'] = stmt['id']
+            # For sources, copy polarity if present in declaration
+            if 'polarity' in stmt: attrs_for_graph_node['polarity'] = stmt['polarity']
+            
+            reconstructed_graph.add_node(inst_name, **attrs_for_graph_node)
+            declared_components_from_flat[inst_name] = {
+                'type': comp_type,
+                'line': stmt.get('line',0),
+                **{k:v for k,v in stmt.items() if k in ['expression', 'direction', 'id', 'polarity']}
+            }
         elif stmt['type'] == 'pin_connection':
             reconstructed_dsu.add_set(stmt['net'])
         elif stmt['type'] == 'net_alias':
