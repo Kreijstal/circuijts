@@ -12,116 +12,144 @@ def ast_to_flattened_ast(regular_ast_statements, dsu):
 
     Args:
         regular_ast_statements (list): List of AST statements from parser or graph_to_structured_ast.
-        dsu (DSU): The Disjoint Set Union object containing canonical net mappings.
+        dsu (DSU): The Disjoint Set Union object containing canonical net mappings
+                   relevant to the `regular_ast_statements`.
 
     Returns:
         list: A list of "flattened" AST statements.
     """
     flattened_statements = []
+    # To quickly find existing declarations by instance name for updates
+    declaration_indices = {}
+    # To store original info, though graph node data might be more comprehensive for type
+    # declared_components_info = {}
 
-    # Pass 1: Extract declarations and start building component info
-    declared_components_info = {}
+    # Pass 1: Process declarations from the input regular_ast_statements
     for stmt in regular_ast_statements:
         if stmt['type'] == 'declaration':
-            declared_components_info[stmt['instance_name']] = {
-                'type': stmt['component_type'],
-                'line': stmt.get('line', 0)
-            }
+            instance_name = stmt['instance_name']
+            decl_idx = len(flattened_statements)
             flattened_statements.append({
                 'type': 'declaration',
                 'component_type': stmt['component_type'],
-                'instance_name': stmt['instance_name'],
+                'instance_name': instance_name,
                 'line': stmt.get('line', 0)
+                # Preserve other attributes from original declaration if any
             })
+            declaration_indices[instance_name] = decl_idx
+            # declared_components_info[instance_name] = {
+            #     'type': stmt['component_type'],
+            #     'line': stmt.get('line', 0)
+            # }
 
-    # Pass 2: Generate graph to easily get all explicit connections
-    # This leverages the existing robust logic in ast_to_graph.
-    # We are essentially using the graph as the most reliable way to "flatten"
-    # the various connection syntaxes.
-    graph, _ = ast_to_graph(regular_ast_statements) # DSU from ast_to_graph is re-created, use the passed one for lookups
+    # Generate graph from the same regular_ast_statements.
+    # The DSU from this graph build (`temp_dsu_for_graph`) is used internally by ast_to_graph
+    # to resolve net names to canonical forms *within the graph structure*.
+    # The `dsu` argument passed to *this function* is for interpreting net names
+    # when generating `net_alias` statements at the end.
+    graph, _ = ast_to_graph(regular_ast_statements)
 
-    component_pins_connected = set() # To avoid duplicate pin_connection entries if multiple AST stmts refer to same connection
-
-    # First handle any internal components from voltage sources or controlled sources
-    for node_name, node_data in graph.nodes(data=True):
-        if node_data.get('node_kind') == 'component_instance' and node_name.startswith('_internal_'):
-            # Add declaration for internal component
-            flattened_statements.append({
-                'type': 'declaration',
-                'component_type': node_data.get('instance_type', 'UNKNOWN'),
-                'instance_name': node_name,
-                'internal': True,
-                'line': 0
-            })
-            
-            # Add its connections
-            for _, neighbor_name, edge_data in graph.edges(node_name, data=True):
-                if graph.nodes[neighbor_name].get('node_kind') == 'electrical_net':
-                    terminal_name = edge_data.get('terminal')
-                    canonical_net_name = neighbor_name
-                    
-                    if terminal_name:
-                        pin_conn = {
-                            'type': 'pin_connection',
-                            'component_instance': node_name,
-                            'terminal': terminal_name,
-                            'net': canonical_net_name,
-                            'line': 0
-                        }
-                        flattened_statements.append(pin_conn)
-
-    # Then handle regular components
+    # Pass 2: Iterate graph nodes. Add declarations for new internal components.
+    # Update existing declarations with details derived from graph (e.g., polarity for sources).
     for node_name, node_data in graph.nodes(data=True):
         if node_data.get('node_kind') == 'component_instance':
             comp_instance_name = node_name
-            # Handle both declared and internal components
-            is_internal = comp_instance_name.startswith("_internal_")
-            if not is_internal and comp_instance_name not in declared_components_info:
-                continue
-            
-            # For internal voltage sources, also include their attributes
-            if 'polarity' in node_data:
-                flattened_statements.append({
-                    'type': 'declaration',
-                    'component_type': 'V',  # It's a voltage source
-                    'instance_name': comp_instance_name,
-                    'polarity': node_data['polarity'],
-                    'internal': True,
-                    'line': 0
-                })
+            instance_graph_type = node_data.get('instance_type') # Type from graph node
+
+            if comp_instance_name.startswith("_internal_"):
+                # This is an internal component (e.g., controlled source from parallel block).
+                # Add its declaration if it wasn't somehow already present (e.g. if regular_ast was already flattened).
+                if comp_instance_name not in declaration_indices:
+                    internal_decl_attrs = {
+                        'expression': node_data.get('expression'),
+                        'direction': node_data.get('direction'),
+                        'id': node_data.get('id'),
+                        'polarity': node_data.get('polarity') # For internal V/I sources if any
+                    }
+                    internal_decl_stmt = {
+                        'type': 'declaration',
+                        'component_type': instance_graph_type,
+                        'instance_name': comp_instance_name,
+                        'internal': True,
+                        'line': node_data.get('line', 0), # Or a default line
+                        **{k:v for k,v in internal_decl_attrs.items() if v is not None}
+                    }
+                    flattened_statements.append(internal_decl_stmt)
+                    declaration_indices[comp_instance_name] = len(flattened_statements) - 1
+            else:
+                # This is a regular, user-declared component (e.g., "V1", "R1").
+                # Its declaration should ideally exist from Pass 1.
+                if comp_instance_name in declaration_indices:
+                    existing_decl_idx = declaration_indices[comp_instance_name]
+                    # Update it with info from graph if not already present (e.g., polarity for sources)
+                    if 'polarity' in node_data and 'polarity' not in flattened_statements[existing_decl_idx]:
+                        flattened_statements[existing_decl_idx]['polarity'] = node_data['polarity']
+                        # flattened_statements[existing_decl_idx]['_graph_augmented'] = True # Optional marker
+                else:
+                    # Anomaly: component in graph wasn't in original regular_ast declarations and isn't internal.
+                    # This might indicate an issue with the input regular_ast_statements.
+                    # ASTValidator should catch undeclared components if regular_ast was from parser.
+                    # If regular_ast itself was a transformation output, it might be missing a decl.
+                    print(f"Warning (ast_to_flattened_ast): Graph component '{comp_instance_name}' (type: {instance_graph_type}) "
+                          f"was not found in original declarations and is not an '_internal_' component. Adding a basic declaration.")
+                    basic_decl = {
+                        'type': 'declaration',
+                        'component_type': instance_graph_type,
+                        'instance_name': comp_instance_name,
+                        'line': node_data.get('line',0),
+                    }
+                    if 'polarity' in node_data: basic_decl['polarity'] = node_data['polarity']
+                    # Add other relevant attributes if available and appropriate
+                    flattened_statements.append(basic_decl)
+                    declaration_indices[comp_instance_name] = len(flattened_statements) - 1
+
+
+    # Pass 3: Add pin_connection statements from graph edges
+    component_pins_connected = set() # To avoid duplicate pin_connection entries
+    for node_name, node_data in graph.nodes(data=True): # Iterate components in graph
+        if node_data.get('node_kind') == 'component_instance':
+            comp_instance_name = node_name
             
             # Iterate over edges connected to this component instance
             for _, neighbor_name, edge_data in graph.edges(comp_instance_name, data=True):
                 if graph.nodes[neighbor_name].get('node_kind') == 'electrical_net':
                     terminal_name = edge_data.get('terminal')
-                    # The neighbor_name is already a canonical net name from the graph construction
-                    canonical_net_name = neighbor_name 
+                    # neighbor_name is already a canonical net name from the graph construction (ast_to_graph)
+                    canonical_net_name = neighbor_name
                     
-                    if terminal_name:
-                        pin_key = (comp_instance_name, terminal_name)
+                    if terminal_name: # Ensure there is a terminal specified on the edge
+                        pin_key = (comp_instance_name, terminal_name, canonical_net_name) # Include net to distinguish multi-pin to same net
                         if pin_key not in component_pins_connected:
                             pin_conn = {
                                 'type': 'pin_connection',
                                 'component_instance': comp_instance_name,
                                 'terminal': terminal_name,
                                 'net': canonical_net_name,
-                                'line': 0
+                                'line': 0 # Line number for pin connections is hard to trace back accurately
                             }
                             flattened_statements.append(pin_conn)
                             component_pins_connected.add(pin_key)
 
-    # Add net aliases for equivalent nets
+    # Pass 4: Add net aliases for equivalent nets, using the DSU passed into this function.
     added_aliases = set()
-    for net_name in dsu.parent:
-        canonical_net = dsu.find(net_name)
-        if net_name != canonical_net and (net_name, canonical_net) not in added_aliases:
-            flattened_statements.append({
-                'type': 'net_alias',
-                'source_net': net_name,
-                'canonical_net': canonical_net,
-                'line': 0
-            })
-            added_aliases.add((net_name, canonical_net))
+    # Ensure all nets involved in aliases are in DSU for find to work without auto-adding
+    # This can be done by iterating through all unique net names seen in pin_connections
+    # and adding them to the DSU if not present. Or assume the DSU is comprehensive.
+    for net_name_original_case in dsu.parent: # Iterate over all known net names in the DSU
+        canonical_net = dsu.find(net_name_original_case)
+        # Only add alias if the original name is different from its canonical form
+        # and this specific alias pair (order-insensitive) hasn't been added.
+        # Also, avoid aliasing a net to itself if it's already canonical.
+        if net_name_original_case != canonical_net:
+            alias_pair = tuple(sorted((net_name_original_case, canonical_net)))
+            if alias_pair not in added_aliases:
+                flattened_statements.append({
+                    'type': 'net_alias',
+                    'source_net': net_name_original_case, # The non-canonical name
+                    'canonical_net': canonical_net,    # Its canonical representative
+                    'line': 0
+                })
+                added_aliases.add(alias_pair)
 
     return flattened_statements
 

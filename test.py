@@ -5,7 +5,7 @@ from circuijt.parser import ProtoCircuitParser
 from circuijt.validator import CircuitValidator
 from circuijt.ast_utils import summarize_circuit_elements, generate_proto_from_ast
 from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast, DSU, get_preferred_net_name_for_reconstruction
-from circuijt.ast_converter import ast_to_flattened_ast
+from circuijt.ast_converter import ast_to_flattened_ast, flattened_ast_to_regular_ast
 
 def test_validator(parsed_statements):
     print("\n--- Testing Validator ---")
@@ -177,7 +177,7 @@ def generate_nmos_small_signal_model_ast(nmos_original_instance_name: str, exter
 
     # 1. Declaration for rDS component
     model_ast_statements.append({
-        'type': 'declaration',
+        'type': 'declaration', 
         'component_type': 'R',
         'instance_name': rds_model_instance_name,
         'line': 0
@@ -267,16 +267,18 @@ def perform_nmos_ss_transformation_and_flatten(initial_circuit_code: str, nmos_t
         if node_data.get('node_kind') == 'component_instance' and node_data.get('instance_type') == 'Nmos':
             for u, v, edge_data in initial_graph.edges(nmos_to_replace, data=True):
                 terminal = edge_data.get('terminal')
-                net_node_canonical = v if u == nmos_to_replace else u
-                if initial_graph.nodes[net_node_canonical].get('node_kind') == 'electrical_net':
+                # Ensure neighbor is an electrical net
+                net_node_graph_name = v if u == nmos_to_replace else u # This is already canonical from ast_to_graph
+                if initial_graph.nodes[net_node_graph_name].get('node_kind') == 'electrical_net':
+                    # Get the preferred *user-facing* name for this canonical net for the model generation
                     preferred_net_name = get_preferred_net_name_for_reconstruction(
-                        net_node_canonical, initial_dsu, allow_implicit_if_only_option=True)
+                        net_node_graph_name, initial_dsu, allow_implicit_if_only_option=True)
                     nmos_external_connections[terminal] = preferred_net_name
         else:
-            print(f"Error: '{nmos_to_replace}' is not an NMOS instance.")
+            print(f"Error: '{nmos_to_replace}' is not an NMOS instance in the graph.")
             return
     else:
-        print(f"Error: Instance '{nmos_to_replace}' not found.")
+        print(f"Error: Instance '{nmos_to_replace}' not found in the graph.")
         return
     
     print(f"\nOriginal connections for {nmos_to_replace}: {nmos_external_connections}")
@@ -288,24 +290,41 @@ def perform_nmos_ss_transformation_and_flatten(initial_circuit_code: str, nmos_t
     combined_ast_statements = []
     
     # Add declarations from original (excluding replaced NMOS) and from SS model
+    processed_declarations = set() # To avoid duplicates if ss_model adds pre-existing ones
     for stmt in initial_ast:
         if stmt['type'] == 'declaration':
             if stmt['instance_name'] == nmos_to_replace: continue
             combined_ast_statements.append(stmt)
+            processed_declarations.add(stmt['instance_name'])
+
     for ss_stmt in ss_model_ast_stmts:
-        if ss_stmt['type'] == 'declaration': combined_ast_statements.append(ss_stmt)
+        if ss_stmt['type'] == 'declaration':
+            if ss_stmt['instance_name'] not in processed_declarations:
+                combined_ast_statements.append(ss_stmt)
+                processed_declarations.add(ss_stmt['instance_name'])
     
-    # Add connection statements from original (excluding replaced NMOS) and from SS model
+    # Add connection statements from original (excluding those involving replaced NMOS directly)
+    # and all connection statements from SS model
     for stmt in initial_ast:
         if stmt['type'] != 'declaration':
-            if stmt['type'] == 'component_connection_block' and stmt['component_name'] == nmos_to_replace: continue
+            # Simple filtering: if a connection block is for the replaced NMOS, skip it.
+            if stmt['type'] == 'component_connection_block' and stmt['component_name'] == nmos_to_replace:
+                continue
+            # More robust filtering would involve checking if any element in a series path
+            # or direct assignment refers to the nmos_to_replace instance or its terminals.
+            # For now, this simple filter might be okay if the SS model re-establishes all needed connections.
             combined_ast_statements.append(stmt)
-    for ss_stmt in ss_model_ast_stmts:
-        if ss_stmt['type'] != 'declaration': combined_ast_statements.append(ss_stmt)
 
-    # Generate final flattened AST
-    final_graph_modified, final_dsu_modified = ast_to_graph(combined_ast_statements)
-    final_flattened_ast = ast_to_flattened_ast(combined_ast_statements, final_dsu_modified)
+    for ss_stmt in ss_model_ast_stmts:
+        if ss_stmt['type'] != 'declaration':
+            combined_ast_statements.append(ss_stmt)
+
+    # Generate graph and DSU from the combined (transformed) AST
+    # This graph and DSU represent the state *after* the NMOS model is inserted.
+    final_transformed_graph, final_transformed_dsu = ast_to_graph(combined_ast_statements)
+    
+    # Generate final flattened AST using the DSU from the transformed circuit
+    final_flattened_ast = ast_to_flattened_ast(combined_ast_statements, final_transformed_dsu)
 
     print("\n--- Resulting Flattened AST ---")
     if not final_flattened_ast:
@@ -317,7 +336,8 @@ def perform_nmos_ss_transformation_and_flatten(initial_circuit_code: str, nmos_t
         # Validate the final flattened AST
         print("\n--- Validating Final Flattened AST ---")
         validator = CircuitValidator(final_flattened_ast)
-        validation_errors = validator.validate()
+        # The CircuitValidator.validate() returns (errors, debug_info)
+        validation_errors, _ = validator.validate() # Unpack the tuple
         if validation_errors:
             print("Validation Errors in Flattened AST:")
             for error in validation_errors:
@@ -325,9 +345,17 @@ def perform_nmos_ss_transformation_and_flatten(initial_circuit_code: str, nmos_t
         else:
             print("Flattened AST validation successful.")
         
-        # Print reconstructed code for verification
-        print("\n--- Reconstructed Circuit from Flattened AST ---")
-        reconstructed_code = generate_proto_from_ast(final_flattened_ast)
+        # Convert flattened AST back to a regular AST for code generation
+        print("\n--- Reconstructing Regular AST from Flattened AST for Code Generation ---")
+        regular_ast_from_flattened = flattened_ast_to_regular_ast(final_flattened_ast)
+
+        if not regular_ast_from_flattened:
+            print("Failed to reconstruct regular AST from flattened AST.")
+            reconstructed_code = "; Could not reconstruct regular AST from flattened AST."
+        else:
+            print("\n--- Reconstructed Circuit Code (from Regular AST derived from Flattened AST) ---")
+            reconstructed_code = generate_proto_from_ast(regular_ast_from_flattened)
+        
         print(reconstructed_code)
 
 # Main execution block

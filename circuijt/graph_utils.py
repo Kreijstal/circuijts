@@ -450,13 +450,23 @@ def graph_to_structured_ast(graph, dsu):
                     })
                     processed_components.add(comp_name)
 
-    # 3. Reconstruct series/parallel paths for remaining components
+    # 3. Reconstruct series/parallel paths for remaining components (including internal behavioral ones)
     net_pair_to_components = {}
+    # Include both declared components and internal behavioral components
+    #all_comp_names_in_graph = sorted([
+    #    n for n, data in component_nodes_data.items()
+    #    if (data.get('instance_type') and
+    #       (not n.startswith('_internal_') or
+    #       data.get('instance_type') in ['controlled_source', 'noise_source'])
+    #])        remaining_for_paths = [c for c in all_declared_comp_names if c not in processed_components]
+
+    #remaining_for_paths = [c for c in all_comp_names_in_graph if c not in processed_components]
     remaining_for_paths = [c for c in all_declared_comp_names if c not in processed_components]
 
     for comp_name in remaining_for_paths:
-        comp_type = component_nodes_data[comp_name]['instance_type']
-        if comp_type not in MULTI_TERMINAL_TYPES: # R, C, L, V, I
+        comp_data = component_nodes_data[comp_name]
+        comp_type = comp_data['instance_type']
+        if comp_type not in MULTI_TERMINAL_TYPES: # R, C, L, V, I, controlled_source, noise_source
             connections_map, _ = get_component_connectivity(graph, comp_name)
             distinct_nets = set(connections_map.values())
             
@@ -487,14 +497,48 @@ def graph_to_structured_ast(graph, dsu):
             comp_name = comps_in_group[0]
             comp_data = component_nodes_data[comp_name]
             if comp_data['instance_type'] in ['V','I'] and 'polarity' in comp_data:
-                 path_elements.append({'type': 'source', 'name': comp_name, 'polarity': comp_data['polarity']})
+                path_elements.append({'type': 'source', 'name': comp_name, 'polarity': comp_data['polarity']})
+            elif comp_name.startswith('_internal_'):
+                if comp_data['instance_type'] == 'controlled_source':
+                    path_elements.append({
+                        'type': 'controlled_source',
+                        'expression': comp_data.get('expression', 'ERROR_NO_EXPR'),
+                        'direction': comp_data.get('direction', '->')
+                    })
+                elif comp_data['instance_type'] == 'noise_source':
+                    path_elements.append({
+                        'type': 'noise_source',
+                        'id': comp_data.get('id', 'ERROR_NO_ID'),
+                        'direction': comp_data.get('direction', '->')
+                    })
             else:
-                 path_elements.append({'type': 'component', 'name': comp_name})
+                path_elements.append({'type': 'component', 'name': comp_name})
             processed_components.add(comp_name)
         else:
             parallel_block_elements = []
             for comp_name in sorted(comps_in_group):
-                parallel_block_elements.append({'type': 'component', 'name': comp_name})
+                comp_data = component_nodes_data[comp_name]
+                if comp_name.startswith('_internal_'):
+                    if comp_data['instance_type'] == 'controlled_source':
+                        parallel_block_elements.append({
+                            'type': 'controlled_source',
+                            'expression': comp_data.get('expression', 'ERROR_NO_EXPR'),
+                            'direction': comp_data.get('direction', '->')
+                        })
+                    elif comp_data['instance_type'] == 'noise_source':
+                        parallel_block_elements.append({
+                            'type': 'noise_source',
+                            'id': comp_data.get('id', 'ERROR_NO_ID'),
+                            'direction': comp_data.get('direction', '->')
+                        })
+                elif comp_data['instance_type'] in ['V','I'] and 'polarity' in comp_data:
+                    parallel_block_elements.append({
+                        'type': 'source',
+                        'name': comp_name,
+                        'polarity': comp_data['polarity']
+                    })
+                else:
+                    parallel_block_elements.append({'type': 'component', 'name': comp_name})
                 processed_components.add(comp_name)
             path_elements.append({'type': 'parallel_block', 'elements': parallel_block_elements})
         
