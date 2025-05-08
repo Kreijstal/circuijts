@@ -331,3 +331,46 @@ def flattened_ast_to_regular_ast(flattened_ast):
             regular_ast.append(path)
 
     return regular_ast
+
+
+def ast_to_graph(
+    parsed_statements,
+    dsu_structure=None,
+    debug=False,
+):  # pylint: disable=unused-argument
+    """Convert AST to a graph representation."""
+    dsu = DSU()
+
+    # First pass - process declarations and build DSU structure
+    for statement in parsed_statements:
+        if statement["type"] == "declaration":
+            dsu.add(statement["instance_name"])
+
+    # Second pass - process connections and build graph edges
+    edges = []
+    for statement in parsed_statements:
+        if statement["type"] == "component_connection_block":
+            for conn in statement["connections"]:
+                edges.append(
+                    {
+                        "type": "edge",
+                        "source": conn["node"],
+                        "target": statement["component_name"],
+                        "terminal": conn["terminal"],
+                    }
+                )
+        elif statement["type"] == "series_connection":
+            for i, element in enumerate(statement["path"]):
+                if element["type"] == "node":
+                    continue
+                prev_node, next_node = _find_adjacent_nodes(statement["path"], i)
+                if element["type"] == "component":
+                    edges.extend(
+                        _process_component_element(element, prev_node, next_node)
+                    )
+                elif element["type"] == "source":
+                    edges.extend(_process_source_element(element, prev_node, next_node))
+                elif element["type"] == "parallel_block":
+                    edges.extend(_process_parallel_block(element, prev_node, next_node))
+
+    return {"nodes": dsu.get_all(), "edges": edges}
