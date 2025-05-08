@@ -1,5 +1,41 @@
+"""Tests for graph utility functions."""
+
 from circuijt.parser import ProtoCircuitParser
 from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
+
+
+# Helper functions to reduce complexity and locals in tests
+
+
+def _check_parallel_component_terminals(graph, comp_name, net1_canonical, net2_canonical, expected_terminals_set):
+    """Checks that a component in a parallel branch connects to two nets with expected terminals."""
+    edge_data_comp_net1_map = graph.get_edge_data(comp_name, net1_canonical)
+    edge_data_comp_net2_map = graph.get_edge_data(comp_name, net2_canonical)
+
+    terminal1 = list(edge_data_comp_net1_map.values())[0]["terminal"] if edge_data_comp_net1_map else None
+    terminal2 = list(edge_data_comp_net2_map.values())[0]["terminal"] if edge_data_comp_net2_map else None
+
+    assert {terminal1, terminal2} == expected_terminals_set
+
+
+def _get_component_connections(graph, comp_name):
+    """Helper to get terminal connections for a component."""
+    connections = {}
+    for _, neighbor_node, edge_data in graph.edges(comp_name, data=True):
+        terminal = edge_data.get("terminal")
+        if terminal:
+            connections[terminal] = neighbor_node
+    return connections
+
+
+def _collect_components_from_element(element, components_set):
+    """Collects component names from a path element into components_set."""
+    if element.get("type") == "component":
+        components_set.add(element["name"])
+    elif element.get("type") == "parallel_block":
+        for pel in element.get("elements", []):
+            if pel.get("type") == "component":
+                components_set.add(pel["name"])
 
 
 def test_simple_series_graph():
@@ -80,26 +116,10 @@ def test_parallel_graph():
         c1_neighbors = set(graph.neighbors("C1"))
         assert c1_neighbors == {out_canonical, gnd_canonical}
 
-        # Optional: Check terminal attributes
-        edge_data_r1_out = graph.get_edge_data("R1", out_canonical)
-        edge_data_r1_gnd = graph.get_edge_data("R1", gnd_canonical)
-        # For MultiGraph, get_edge_data returns a dict of edge keys to edge data
-        # Get the first edge's data since we know there's only one edge between these nodes
-        edge_data_r1_out = list(edge_data_r1_out.values())[0] if edge_data_r1_out else None
-        edge_data_r1_gnd = list(edge_data_r1_gnd.values())[0] if edge_data_r1_gnd else None
-        assert {edge_data_r1_out["terminal"], edge_data_r1_gnd["terminal"]} == {
-            "par_t1",
-            "par_t2",
-        }
-
-        edge_data_c1_out_map = graph.get_edge_data("C1", out_canonical)
-        edge_data_c1_gnd_map = graph.get_edge_data("C1", gnd_canonical)
-        edge_data_c1_out = list(edge_data_c1_out_map.values())[0] if edge_data_c1_out_map else None
-        edge_data_c1_gnd = list(edge_data_c1_gnd_map.values())[0] if edge_data_c1_gnd_map else None
-        assert {edge_data_c1_out["terminal"], edge_data_c1_gnd["terminal"]} == {
-            "par_t1",
-            "par_t2",
-        }
+        # Optional: Check terminal attributes using helper
+        expected_terms = {"par_t1", "par_t2"}
+        _check_parallel_component_terminals(graph, "R1", out_canonical, gnd_canonical, expected_terms)
+        _check_parallel_component_terminals(graph, "C1", out_canonical, gnd_canonical, expected_terms)
 
     except AssertionError as e:
         print("\n--- Test Failed: test_parallel_graph ---")
@@ -137,23 +157,14 @@ def test_transistor_graph():
         assert gnd_net in graph.nodes() and graph.nodes[gnd_net]["node_kind"] == "electrical_net"
         assert out_net in graph.nodes() and graph.nodes[out_net]["node_kind"] == "electrical_net"
 
-        # Check terminal connections from M1
-        terminals_connected_to_nets = {}  # terminal_name -> connected_net_canonical
+        # Check terminal connections from M1 using helper
+        m1_connections = _get_component_connections(graph, "M1")
 
-        for _, net_node, data in graph.edges("M1", data=True):  # Iterates edges connected to M1
-            terminal = data.get("terminal")
-            if terminal:
-                # Handle cases where multiple terminals might connect to the same net (though not for M1's distinct G,D here)
-                # For S and B connecting to GND, this check method is fine.
-                if terminal in terminals_connected_to_nets:  # e.g. if S already pointed to GND, and B also points to GND
-                    assert terminals_connected_to_nets[terminal] == net_node  # Ensure consistency if re-adding
-                terminals_connected_to_nets[terminal] = net_node
-
-        assert terminals_connected_to_nets.get("G") == in_net
-        assert terminals_connected_to_nets.get("S") == gnd_net
-        assert terminals_connected_to_nets.get("D") == out_net
-        assert terminals_connected_to_nets.get("B") == gnd_net
-        assert len(terminals_connected_to_nets) == 4  # Ensure all 4 terminals were processed
+        assert m1_connections.get("G") == in_net
+        assert m1_connections.get("S") == gnd_net
+        assert m1_connections.get("D") == out_net
+        assert m1_connections.get("B") == gnd_net
+        assert len(m1_connections) == 4  # Ensure all 4 terminals were processed
     except AssertionError as e:
         print("\n--- Test Failed: test_transistor_graph ---")
         print("Circuit:\n", circuit)
@@ -185,12 +196,8 @@ def test_voltage_source_graph():
         assert "V1" in graph.nodes() and graph.nodes["V1"]["node_kind"] == "component_instance"
         assert "R1" in graph.nodes() and graph.nodes["R1"]["node_kind"] == "component_instance"
 
-        # V1 connections
-        v1_connections = {}  # terminal -> net
-        for u_node, v_node, data in graph.edges("V1", data=True):
-            net_node_for_terminal = v_node if u_node == "V1" else u_node
-            if "terminal" in data:
-                v1_connections[data["terminal"]] = net_node_for_terminal
+        # V1 connections using helper
+        v1_connections = _get_component_connections(graph, "V1")
 
         assert len(v1_connections) == 2  # neg and pos terminals
         assert dsu.find(v1_connections.get("neg")) == gnd_canonical
@@ -200,10 +207,8 @@ def test_voltage_source_graph():
         assert implicit_node_v1_r1 is not None
         assert graph.nodes[implicit_node_v1_r1]["node_kind"] == "electrical_net"
 
-        # R1 connections
-        r1_connections = {}  # terminal -> net
-        for _, net_node, data in graph.edges("R1", data=True):
-            r1_connections[data["terminal"]] = net_node
+        # R1 connections using helper
+        r1_connections = _get_component_connections(graph, "R1")
 
         assert len(r1_connections) == 2  # t1_series and t2_series
         assert r1_connections.get("t1_series") == implicit_node_v1_r1 or r1_connections.get("t2_series") == implicit_node_v1_r1
@@ -242,49 +247,39 @@ def test_complex_circuit_graph():
         graph, dsu = ast_to_graph(statements)
 
         # Canonical net names
-        node_g_canonical = dsu.find("node_g")
-        gnd_canonical = dsu.find("GND")
-        vdd_canonical = dsu.find("VDD")
-        node_d_canonical = dsu.find("node_d")
-        # M1.D is aliased to node_d, M1.S to GND. DSU handles this.
+        nets = {name: dsu.find(name) for name in ["node_g", "GND", "VDD", "node_d"]}
 
-        # Check essential component nodes
-        assert "M1" in graph.nodes()
-        assert "Rd" in graph.nodes()
-        assert "Cgs" in graph.nodes()
-        assert "Vin" in graph.nodes()
-        # Rs is declared but not used; should still be a node.
-        assert "Rs" in graph.nodes()
+        # Check essential component nodes (Rs is declared but not used)
+        for comp in ["M1", "Rd", "Cgs", "Vin", "Rs"]:
+            assert comp in graph.nodes()
 
         # Check Rd connections: (VDD) -- Rd -- (node_d)
         rd_neighbors = set(graph.neighbors("Rd"))
-        assert rd_neighbors == {vdd_canonical, node_d_canonical}
+        assert rd_neighbors == {nets["VDD"], nets["node_d"]}
 
         # Find the controlled source node (internal)
         cs_nodes = [
             n
-            for n, data in graph.nodes(data=True)
-            if data.get("instance_type") == "controlled_source" and data.get("expression") == "gm1*vgs1"
+            for n, node_data in graph.nodes(data=True)
+            if node_data.get("instance_type") == "controlled_source" and node_data.get("expression") == "gm1*vgs1"
         ]
         assert len(cs_nodes) == 1
         cs_node_name = cs_nodes[0]
 
         # Controlled source and Cgs are in parallel between node_d_canonical and gnd_canonical
         cs_neighbors = set(graph.neighbors(cs_node_name))
-        assert cs_neighbors == {node_d_canonical, gnd_canonical}
+        assert cs_neighbors == {nets["node_d"], nets["GND"]}
 
         cgs_neighbors = set(graph.neighbors("Cgs"))
-        assert cgs_neighbors == {node_d_canonical, gnd_canonical}
+        assert cgs_neighbors == {nets["node_d"], nets["GND"]}
 
-        # M1 connections from block and direct assignments
-        m1_connections_from_graph = {}
-        for _, net_node, data in graph.edges("M1", data=True):
-            m1_connections_from_graph[data["terminal"]] = net_node
+        # M1 connections from block and direct assignments, using helper
+        m1_connections = _get_component_connections(graph, "M1")
 
-        assert m1_connections_from_graph.get("G") == node_g_canonical
-        assert m1_connections_from_graph.get("B") == gnd_canonical
-        assert m1_connections_from_graph.get("D") == node_d_canonical  # From (M1.D):(node_d) via DSU
-        assert m1_connections_from_graph.get("S") == gnd_canonical  # From (M1.S):(GND) via DSU
+        assert m1_connections.get("G") == nets["node_g"]
+        assert m1_connections.get("B") == nets["GND"]
+        assert m1_connections.get("D") == nets["node_d"]
+        assert m1_connections.get("S") == nets["GND"]
     except AssertionError as e:
         print("\n--- Test Failed: test_complex_circuit_graph ---")
         print("Circuit:\n", circuit)
@@ -321,23 +316,15 @@ def test_voltage_source_polarity_variations():
             dsu.find("GND"),
         )
 
-        # Check V_std (-+)
-        v_std_edges = list(graph.edges("V_std", data=True))
-        assert len(v_std_edges) == 2
-        v_std_connections = {}
-        for u, v, data in v_std_edges:
-            net_node = v if u == "V_std" else u
-            v_std_connections[data["terminal"]] = net_node
+        # Check V_std (-+) using helper
+        v_std_connections = _get_component_connections(graph, "V_std")
+        assert len(v_std_connections) == 2
         assert v_std_connections.get("neg") == n1_c, f"V_std neg expected {n1_c}, got {v_std_connections.get('neg')}"
         assert v_std_connections.get("pos") == n2_c, f"V_std pos expected {n2_c}, got {v_std_connections.get('pos')}"
 
-        # Check V_rev (+-)
-        v_rev_edges = list(graph.edges("V_rev", data=True))
-        assert len(v_rev_edges) == 2
-        v_rev_connections = {}
-        for u, v, data in v_rev_edges:
-            net_node = v if u == "V_rev" else u
-            v_rev_connections[data["terminal"]] = net_node
+        # Check V_rev (+-) using helper
+        v_rev_connections = _get_component_connections(graph, "V_rev")
+        assert len(v_rev_connections) == 2
         assert v_rev_connections.get("pos") == n3_c, f"V_rev pos expected {n3_c}, got {v_rev_connections.get('pos')}"
         assert v_rev_connections.get("neg") == n4_c, f"V_rev neg expected {n4_c}, got {v_rev_connections.get('neg')}"
 
@@ -372,39 +359,24 @@ def test_no_duplicate_parallel_elements():
         graph, dsu = ast_to_graph(statements)
 
         # Check that R_par1 and R_par2 appear only once
-        r_par1_nodes = [n for n in graph.nodes() if n == "R_par1"]
-        assert len(r_par1_nodes) == 1, "R_par1 should appear exactly once in graph nodes"
-        r_par2_nodes = [n for n in graph.nodes() if n == "R_par2"]
-        assert len(r_par2_nodes) == 1, "R_par2 should appear exactly once in graph nodes"
+        for comp_name in ["R_par1", "R_par2"]:
+            comp_nodes = [n for n in graph.nodes() if n == comp_name]
+            assert len(comp_nodes) == 1, f"{comp_name} should appear exactly once"
 
-        # Check connections for R_par1
-        in_c, mid_c = dsu.find("in"), dsu.find("mid")
-        r_par1_neighbors = set()
-        for u, v, data in graph.edges("R_par1", data=True):
-            neighbor = v if u == "R_par1" else u
-            r_par1_neighbors.add(neighbor)
-        assert r_par1_neighbors == {
-            in_c,
-            mid_c,
-        }, (
-            f"R_par1 connections incorrect. Expected {in_c, mid_c}, " f"got {r_par1_neighbors}"
-        )
+        # Check connections
+        nets = {name: dsu.find(name) for name in ["in", "mid"]}
+        expected_neighbors = {nets["in"], nets["mid"]}
 
-        # Check connections for R_par2
-        r_par2_neighbors = set()
-        for u, v, data in graph.edges("R_par2", data=True):
-            neighbor = v if u == "R_par2" else u
-            r_par2_neighbors.add(neighbor)
-        assert r_par2_neighbors == {
-            in_c,
-            mid_c,
-        }, (
-            f"R_par2 connections incorrect. Expected {in_c, mid_c}, " f"got {r_par2_neighbors}"
-        )
+        for comp_name in ["R_par1", "R_par2"]:
+            neighbors = set()
+            for u, v, _ in graph.edges(comp_name, data=True):
+                neighbor = v if u == comp_name else u
+                neighbors.add(neighbor)
+            assert (
+                neighbors == expected_neighbors
+            ), f"{comp_name} connections incorrect. Expected {expected_neighbors}, got {neighbors}"
+            assert len(list(graph.edges(comp_name))) == 2, f"{comp_name} should have 2 edges"
 
-        # Check number of edges for R_par1 and R_par2 (should be 2 each, one to 'in', one to 'mid')
-        assert len(list(graph.edges("R_par1"))) == 2, "R_par1 should have exactly 2 edges"
-        assert len(list(graph.edges("R_par2"))) == 2, "R_par2 should have exactly 2 edges"
     except AssertionError as e:
         print("\\n--- Test Failed: test_no_duplicate_parallel_elements ---")
         print(f"Circuit:\\n{circuit}")
@@ -487,16 +459,11 @@ def test_graph_to_ast_connections():
         series_connections = [s for s in reconstructed_ast if s["type"] == "series_connection"]
         assert series_connections, "No series connections found in reconstructed AST"
 
-        # Check all components are present in connections
+        # Check all components are present in connections using helper
         components_in_series = set()
         for conn in series_connections:
             for element in conn["path"]:
-                if element.get("type") == "component":
-                    components_in_series.add(element["name"])
-                elif element.get("type") == "parallel_block":
-                    for pel in element.get("elements", []):
-                        if pel.get("type") == "component":
-                            components_in_series.add(pel["name"])
+                _collect_components_from_element(element, components_in_series)
 
         missing_comps = {"R1", "C1"} - components_in_series
         err_msg = f"Components missing from series connections: {missing_comps}. " f"Found: {components_in_series}"

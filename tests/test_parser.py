@@ -132,12 +132,12 @@ def test_parallel_blocks():
     parser = ProtoCircuitParser()
     # Basic parallel components
     path = "(out) -- [ R1 || C1 ] -- (GND)"
-    _, errors = parser.parse_text(path) # Renamed statements to _
+    _, errors = parser.parse_text(path)  # Renamed statements to _
     assert not errors
 
     # Parallel with controlled source
     path = "(drain) -- [ gm1*vgs1 (->) || rds1 ] -- (source)"
-    _, errors = parser.parse_text(path) # Renamed statements to _
+    _, errors = parser.parse_text(path)  # Renamed statements to _
     assert not errors
 
 
