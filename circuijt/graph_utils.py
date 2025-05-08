@@ -265,14 +265,24 @@ def ast_to_graph(parsed_statements):
 
                 elif item_type == 'source':
                     source_name = item['name']
-                    polarity = item['polarity']
+                    polarity = item['polarity'] # Expected to be "-+" or "+-"
                     if source_name not in declared_components: continue
                     source_node_name = declared_components[source_name]['instance_node_name']
                     G.nodes[source_node_name]['polarity'] = polarity
-                    if polarity == '(-+)':
+                    
+                    # Determine if standard polarity (-+) is used
+                    # Standard: neg terminal connects to current_attach_point, pos to next_attach_point
+                    # Reversed: pos terminal connects to current_attach_point, neg to next_attach_point
+                    is_standard_polarity = False # Default to False (reversed or unspecified)
+                    if polarity == "-+":
+                        is_standard_polarity = True
+                    # No explicit else needed, if polarity is not "-+", is_standard_polarity remains False,
+                    # implying reversed polarity for "+-" or other cases.
+
+                    if is_standard_polarity:
                         G.add_edge(source_name, current_attach_point_canonical, terminal='neg', key='neg')
                         G.add_edge(source_name, next_attach_point_canonical, terminal='pos', key='pos')
-                    else: # (+-)
+                    else: # Handles reversed polarity like "+-"
                         G.add_edge(source_name, current_attach_point_canonical, terminal='pos', key='pos')
                         G.add_edge(source_name, next_attach_point_canonical, terminal='neg', key='neg')
                 

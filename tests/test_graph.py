@@ -151,8 +151,10 @@ def test_voltage_source_graph():
 
     # V1 connections
     v1_connections = {} # terminal -> net
-    for _, net_node, data in graph.edges('V1', data=True):
-        v1_connections[data['terminal']] = net_node
+    for u_node, v_node, data in graph.edges('V1', data=True):
+        net_node_for_terminal = v_node if u_node == 'V1' else u_node
+        if 'terminal' in data:
+            v1_connections[data['terminal']] = net_node_for_terminal
     
     assert len(v1_connections) == 2 # neg and pos terminals
     assert dsu.find(v1_connections.get('neg')) == gnd_canonical
