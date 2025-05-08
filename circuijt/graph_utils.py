@@ -90,6 +90,72 @@ class DSU:
         return {item for item in self.parent if self.find(item) == canonical_rep}
 
 
+def _process_declarations(G, parsed_statements, electrical_nets_dsu):
+    """Process declarations and pre-populate DSU with known explicit net names."""
+    declared_components = {}
+    for stmt in parsed_statements:
+        stmt_type = stmt.get("type")
+        if stmt_type == "declaration":
+            comp_type = stmt["component_type"]
+            inst_name = stmt["instance_name"]
+            declared_components[inst_name] = {
+                "type": comp_type,
+                "line": stmt["line"],
+                "instance_node_name": inst_name,
+            }
+            G.add_node(inst_name, node_kind="component_instance", instance_type=comp_type)
+        elif stmt_type == "component_connection_block":
+            comp_name = stmt["component_name"]
+            for conn in stmt.get("connections", []):
+                electrical_nets_dsu.add_set(conn["node"])
+                electrical_nets_dsu.add_set(f"{comp_name}.{conn['terminal']}")
+        elif stmt_type == "direct_assignment":
+            electrical_nets_dsu.add_set(stmt["source_node"])
+            electrical_nets_dsu.add_set(stmt["target_node"])
+        elif stmt_type == "series_connection":
+            for item in stmt.get("path", []):
+                if item.get("type") == "node":
+                    electrical_nets_dsu.add_set(item["name"])
+    return declared_components
+
+def _handle_component_connection(G, stmt, declared_components, electrical_nets_dsu):
+    """Handle component connection block statements."""
+    comp_name = stmt["component_name"]
+    if comp_name not in declared_components:
+        print(f"AST_TO_GRAPH_WARNING: Component '{comp_name}' in block not declared. Skipping.")
+        return
+
+    comp_node_name = declared_components[comp_name]["instance_node_name"]
+    for conn in stmt.get("connections", []):
+        terminal_name = conn["terminal"]
+        explicit_net_name = conn["node"]
+        device_terminal = f"{comp_name}.{terminal_name}"
+
+        electrical_nets_dsu.union(device_terminal, explicit_net_name)
+        canonical_net = electrical_nets_dsu.find(explicit_net_name)
+        if not G.has_node(canonical_net):
+            G.add_node(canonical_net, node_kind="electrical_net")
+        G.add_edge(comp_node_name, canonical_net, terminal=terminal_name)
+
+        if "." in explicit_net_name:
+            ref_comp, ref_term = explicit_net_name.split(".", 1)
+            if ref_comp in declared_components:
+                G.add_edge(ref_comp, canonical_net, terminal=ref_term)
+
+def _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu):
+    """Handle direct assignment statements."""
+    s_node, t_node = stmt["source_node"], stmt["target_node"]
+    electrical_nets_dsu.union(s_node, t_node)
+    canonical_net = electrical_nets_dsu.find(s_node)
+    if not G.has_node(canonical_net):
+        G.add_node(canonical_net, node_kind="electrical_net")
+
+    for node_name in [s_node, t_node]:
+        if "." in node_name:
+            comp_name, term = node_name.split(".", 1)
+            if comp_name in declared_components:
+                G.add_edge(comp_name, canonical_net, terminal=term)
+
 def ast_to_graph(parsed_statements):
     """
     Converts a Proto-Language AST into a graph representation.
@@ -106,337 +172,186 @@ def ast_to_graph(parsed_statements):
         - Attribute: 'terminal' (e.g., 'G', 'D', 't1_series') indicating the
           component terminal involved in the connection.
     """
-    G = (
-        nx.MultiGraph()
-    )  # Changed from Graph() to properly handle multiple terminals to same net
-    # Store component declarations: name -> {type, line, instance_node_name (same as name)}
-    declared_components = {}
-    # DSU to manage equivalence classes of electrical net names
+    G = nx.MultiGraph()
     electrical_nets_dsu = DSU()
 
-    # Initialize special nodes like GND and VDD in DSU first
-    # This ensures they become canonical representatives for their sets
+    # Initialize special nodes
     for special_node in ["GND", "VDD"]:
         electrical_nets_dsu.add_set(special_node)
 
     implicit_node_idx = 0
-    # For naming internally generated components like VCCS from parallel blocks
     internal_component_idx = 0
 
-    # --- Pass 1: Process declarations and pre-populate DSU with known explicit net names ---
-    for stmt in parsed_statements:
-        stmt_type = stmt.get("type")
-        if stmt_type == "declaration":
-            comp_type = stmt["component_type"]
-            inst_name = stmt["instance_name"]
-            # Store declaration info and add component instance node to graph
-            declared_components[inst_name] = {
-                "type": comp_type,
-                "line": stmt["line"],
-                "instance_node_name": inst_name,
-            }
-            G.add_node(
-                inst_name, node_kind="component_instance", instance_type=comp_type
-            )
+    # Pass 1: Process declarations
+    declared_components = _process_declarations(G, parsed_statements, electrical_nets_dsu)
+def _handle_series_connection(G, stmt, declared_components, electrical_nets_dsu, implicit_node_idx, internal_component_idx):
+    """Handle series connection statements."""
+    path = stmt.get("path", [])
+    if not path or path[0].get("type") != "node":
+        print(f"AST_TO_GRAPH_WARNING: Series path malformed or empty: {stmt.get('_path_str', 'N/A')}")
+        return implicit_node_idx, internal_component_idx
 
-        # Pre-scan for all explicitly named nodes to add them to DSU early.
-        # This helps in ensuring `find` always works on known items.
-        elif stmt_type == "component_connection_block":
-            comp_name = stmt["component_name"]
-            for conn in stmt.get("connections", []):
-                electrical_nets_dsu.add_set(conn["node"])  # e.g., (node_gate)
-                electrical_nets_dsu.add_set(
-                    f"{comp_name}.{conn['terminal']}"
-                )  # e.g., (M1.G)
-        elif stmt_type == "direct_assignment":
-            electrical_nets_dsu.add_set(stmt["source_node"])
-            electrical_nets_dsu.add_set(stmt["target_node"])
-        elif stmt_type == "series_connection":
-            for item in stmt.get("path", []):
-                if item.get("type") == "node":
-                    electrical_nets_dsu.add_set(item["name"])
-    # --- Pass 2: Process connections and build graph structure using canonical net names ---
-    for stmt in parsed_statements:
-        stmt_type = stmt.get("type")
+    # Process start node
+    start_node_original_name = path[0]["name"]
+    current_attach_point = electrical_nets_dsu.find(start_node_original_name)
+    if not G.has_node(current_attach_point):
+        G.add_node(current_attach_point, node_kind="electrical_net")
 
-        if stmt_type == "declaration":
-            continue  # Already handled
+    if "." in start_node_original_name:
+        comp_part, term_part = start_node_original_name.split(".", 1)
+        if comp_part in declared_components:
+            G.add_edge(comp_part, current_attach_point, terminal=term_part)
 
-        elif stmt_type == "component_connection_block":
-            comp_name = stmt["component_name"]
-            if comp_name not in declared_components:
-                # This case should ideally be caught by a validator before this stage
-                print(
-                    f"AST_TO_GRAPH_WARNING: Component '{comp_name}' in block not declared. Skipping."
-                )
-                continue
+    # Process remaining path elements
+    for i in range(1, len(path)):
+        item = path[i]
+        item_type = item.get("type")
 
-            comp_node_name = declared_components[comp_name]["instance_node_name"]
-
-            for conn in stmt.get("connections", []):
-                terminal_name = conn["terminal"]
-                # Net name explicitly mentioned in the connection, e.g., "node_gate"
-                explicit_net_name_in_connection = conn["node"]
-                # The device terminal itself is also an electrical net, e.g., "M1.G"
-                device_terminal_as_net_name = f"{comp_name}.{terminal_name}"
-
-                # Crucial: This block implies these two nets are the same.
-                electrical_nets_dsu.union(
-                    device_terminal_as_net_name, explicit_net_name_in_connection
-                )
-
-                # Connect the component to the *canonical representative* of this unified net.
-                canonical_net_name = electrical_nets_dsu.find(
-                    explicit_net_name_in_connection
-                )
-                if not G.has_node(
-                    canonical_net_name
-                ):  # Ensure canonical net node exists
-                    G.add_node(canonical_net_name, node_kind="electrical_net")
-
-                G.add_edge(comp_node_name, canonical_net_name, terminal=terminal_name)
-
-                # MODIFICATION START: Ensure connectivity for referenced device terminals
-                if "." in explicit_net_name_in_connection:
-                    referenced_comp_name, referenced_term_name = (
-                        explicit_net_name_in_connection.split(".", 1)
-                    )
-                    if referenced_comp_name in declared_components:
-                        # Connect the referenced component (e.g., M1) to this same canonical_net_name
-                        # (which is find(M1.D)) via its specified terminal (e.g., D).
-                        G.add_edge(
-                            referenced_comp_name,
-                            canonical_net_name,
-                            terminal=referenced_term_name,
-                        )
-                # MODIFICATION END
-
-        elif stmt_type == "direct_assignment":
-            s_node, t_node = stmt["source_node"], stmt["target_node"]
-            electrical_nets_dsu.union(s_node, t_node)
-            canonical_net = electrical_nets_dsu.find(
-                s_node
-            )  # Both s_node and t_node now map to same canonical net
-
-            # Ensure the canonical net exists in graph
-            if not G.has_node(canonical_net):
-                G.add_node(canonical_net, node_kind="electrical_net")
-
-            # Handle device terminals in direct assignments
-            for node_name in [s_node, t_node]:
-                if "." in node_name:  # It's a device terminal like M1.D
-                    comp_name, term = node_name.split(".", 1)
-                    if comp_name in declared_components:
-                        G.add_edge(comp_name, canonical_net, terminal=term)
-
-        elif stmt_type == "series_connection":
-            path = stmt.get("path", [])
-            if not path or path[0].get("type") != "node":
-                # Parser should ensure paths start with a node.
-                print(
-                    f"AST_TO_GRAPH_WARNING: Series path malformed or empty: {stmt.get('_path_str', 'N/A')}"
-                )
-                continue
-
-            # `current_attach_point` is always the canonical name of an electrical net.
-            start_node_original_name = path[0]["name"]
-            current_attach_point_canonical = electrical_nets_dsu.find(
-                start_node_original_name
-            )
-            if not G.has_node(current_attach_point_canonical):
-                G.add_node(current_attach_point_canonical, node_kind="electrical_net")
-
-            # MODIFICATION START: Ensure connectivity for start node if it's a device terminal
-            if "." in start_node_original_name:
-                comp_part, term_part = start_node_original_name.split(".", 1)
+        if item_type == "node":
+            node_name = item["name"]
+            current_attach_point = electrical_nets_dsu.find(node_name)
+            if not G.has_node(current_attach_point):
+                G.add_node(current_attach_point, node_kind="electrical_net")
+            if "." in node_name:
+                comp_part, term_part = node_name.split(".", 1)
                 if comp_part in declared_components:
-                    G.add_edge(
-                        comp_part, current_attach_point_canonical, terminal=term_part
-                    )
-            # MODIFICATION END
+                    G.add_edge(comp_part, current_attach_point, terminal=term_part)
+            continue
 
-            # Process elements from the second item onwards
-            for i in range(1, len(path)):
-                item = path[i]
-                item_type = item.get("type")
+        # Determine next attach point
+        next_attach_point = None
+        created_new_implicit_node = False
 
-                # Skip if item is a node - it becomes the new current_attach_point for next iteration
-                if item_type == "node":
-                    original_node_name_in_path = item["name"]
-                    current_attach_point_canonical = electrical_nets_dsu.find(
-                        original_node_name_in_path
-                    )
-                    if not G.has_node(current_attach_point_canonical):
-                        G.add_node(
-                            current_attach_point_canonical, node_kind="electrical_net"
-                        )
-                    if "." in original_node_name_in_path:
-                        comp_part, term_part = original_node_name_in_path.split(".", 1)
-                        if comp_part in declared_components:
-                            G.add_edge(
-                                comp_part,
-                                current_attach_point_canonical,
-                                terminal=term_part,
-                            )
-                    continue
+        if i + 1 < len(path) and path[i + 1].get("type") == "node":
+            next_node_name = path[i + 1]["name"]
+            next_attach_point = electrical_nets_dsu.find(next_node_name)
+        else:
+            implicit_node_name = f"_implicit_{implicit_node_idx}"
+            next_attach_point = electrical_nets_dsu.find(implicit_node_name)
+            if not G.has_node(next_attach_point):
+                created_new_implicit_node = True
 
-                # Item is a component, source, or parallel_block - determine next attach point
-                next_attach_point_canonical = None
-                created_new_implicit_node = False
+        if next_attach_point and not G.has_node(next_attach_point):
+            G.add_node(next_attach_point, node_kind="electrical_net")
 
-                if i + 1 < len(path) and path[i + 1].get("type") == "node":
-                    next_explicit_node_name = path[i + 1]["name"]
-                    next_attach_point_canonical = electrical_nets_dsu.find(
-                        next_explicit_node_name
-                    )
-                else:
-                    # Need an implicit node after this item
-                    implicit_node_name_raw = f"_implicit_{implicit_node_idx}"
-                    next_attach_point_canonical = electrical_nets_dsu.find(
-                        implicit_node_name_raw
-                    )
-                    if not G.has_node(next_attach_point_canonical):
-                        created_new_implicit_node = True
+        # Handle different item types
+        if item_type == "component":
+            _handle_series_component(G, item, declared_components, current_attach_point, next_attach_point)
+        elif item_type == "source":
+            _handle_series_source(G, item, declared_components, current_attach_point, next_attach_point)
+        elif item_type == "parallel_block":
+            internal_component_idx = _handle_parallel_block(
+                G, item, declared_components, current_attach_point, next_attach_point, internal_component_idx
+            )
 
-                if next_attach_point_canonical and not G.has_node(
-                    next_attach_point_canonical
-                ):
-                    G.add_node(next_attach_point_canonical, node_kind="electrical_net")
+        current_attach_point = next_attach_point
+        if created_new_implicit_node:
+            implicit_node_idx += 1
 
-                # Handle structural items (component, source, parallel_block)
-                if item_type == "component":
-                    comp_name = item["name"]
-                    if comp_name not in declared_components:
-                        continue
-                    comp_node_name = declared_components[comp_name][
-                        "instance_node_name"
-                    ]
-                    G.add_edge(
-                        comp_node_name,
-                        current_attach_point_canonical,
-                        terminal="t1_series",
-                        key="t1_series",
-                    )
-                    G.add_edge(
-                        comp_node_name,
-                        next_attach_point_canonical,
-                        terminal="t2_series",
-                        key="t2_series",
-                    )
+    return implicit_node_idx, internal_component_idx
 
-                elif item_type == "source":
-                    source_name = item["name"]
-                    polarity = item["polarity"]  # Expected to be "-+" or "+-"
-                    if source_name not in declared_components:
-                        continue
-                    source_node_name = declared_components[source_name][
-                        "instance_node_name"
-                    ]
-                    G.nodes[source_node_name]["polarity"] = polarity
+def _handle_series_component(G, item, declared_components, current_attach_point, next_attach_point):
+    """Handle component in series connection."""
+    comp_name = item["name"]
+    if comp_name not in declared_components:
+        return
+    comp_node_name = declared_components[comp_name]["instance_node_name"]
+    G.add_edge(comp_node_name, current_attach_point, terminal="t1_series", key="t1_series")
+    G.add_edge(comp_node_name, next_attach_point, terminal="t2_series", key="t2_series")
 
-                    # Determine if standard polarity (-+) is used
-                    # Standard: neg terminal connects to current_attach_point, pos to next_attach_point
-                    # Reversed: pos terminal connects to current_attach_point, neg to next_attach_point
-                    is_standard_polarity = (
-                        False  # Default to False (reversed or unspecified)
-                    )
-                    if polarity == "-+":
-                        is_standard_polarity = True
-                    # No explicit else needed, if polarity is not "-+", is_standard_polarity remains False,
-                    # implying reversed polarity for "+-" or other cases.
+def _handle_series_source(G, item, declared_components, current_attach_point, next_attach_point):
+    """Handle source in series connection."""
+    source_name = item["name"]
+    if source_name not in declared_components:
+        return
+    polarity = item["polarity"]
+    source_node_name = declared_components[source_name]["instance_node_name"]
+    G.nodes[source_node_name]["polarity"] = polarity
 
-                    if is_standard_polarity:
-                        G.add_edge(
-                            source_name,
-                            current_attach_point_canonical,
-                            terminal="neg",
-                            key="neg",
-                        )
-                        G.add_edge(
-                            source_name,
-                            next_attach_point_canonical,
-                            terminal="pos",
-                            key="pos",
-                        )
-                    else:  # Handles reversed polarity like "+-"
-                        G.add_edge(
-                            source_name,
-                            current_attach_point_canonical,
-                            terminal="pos",
-                            key="pos",
-                        )
-                        G.add_edge(
-                            source_name,
-                            next_attach_point_canonical,
-                            terminal="neg",
-                            key="neg",
-                        )
+    if polarity == "-+":
+        G.add_edge(source_name, current_attach_point, terminal="neg", key="neg")
+        G.add_edge(source_name, next_attach_point, terminal="pos", key="pos")
+    else:
+        G.add_edge(source_name, current_attach_point, terminal="pos", key="pos")
+        G.add_edge(source_name, next_attach_point, terminal="neg", key="neg")
 
-                elif item_type == "parallel_block":
-                    for pel in item.get("elements", []):
-                        element_node_name_in_graph = None
-                        attrs = {"node_kind": "component_instance"}
-                        if pel["type"] == "component":
-                            if pel["name"] in declared_components:
-                                element_node_name_in_graph = declared_components[
-                                    pel["name"]
-                                ]["instance_node_name"]
-                        elif pel["type"] == "controlled_source":
-                            element_node_name_in_graph = (
-                                f"_internal_cs_{internal_component_idx}"
-                            )
-                            attrs.update(
-                                {
-                                    "instance_type": "controlled_source",
-                                    "expression": pel["expression"],
-                                    "direction": pel["direction"],
-                                }
-                            )
-                            internal_component_idx += 1
-                        elif pel["type"] == "noise_source":
-                            element_node_name_in_graph = (
-                                f"_internal_ns_{internal_component_idx}"
-                            )
-                            attrs.update(
-                                {
-                                    "instance_type": "noise_source",
-                                    "id": pel["id"],
-                                    "direction": pel["direction"],
-                                }
-                            )
-                            internal_component_idx += 1
+def _handle_parallel_block(G, item, declared_components, current_attach_point, next_attach_point, internal_component_idx):
+    """Handle parallel block in series connection."""
+    for pel in item.get("elements", []):
+        element_node_name = None
+        attrs = {"node_kind": "component_instance"}
 
-                        if element_node_name_in_graph:
-                            if not G.has_node(element_node_name_in_graph):
-                                G.add_node(element_node_name_in_graph, **attrs)
-                            G.add_edge(
-                                element_node_name_in_graph,
-                                current_attach_point_canonical,
-                                terminal="par_t1",
-                                key="par_t1",
-                            )
-                            G.add_edge(
-                                element_node_name_in_graph,
-                                next_attach_point_canonical,
-                                terminal="par_t2",
-                                key="par_t2",
-                            )
+        if pel["type"] == "component":
+            if pel["name"] in declared_components:
+                element_node_name = declared_components[pel["name"]]["instance_node_name"]
+        elif pel["type"] == "controlled_source":
+            element_node_name = f"_internal_cs_{internal_component_idx}"
+            attrs.update({
+                "instance_type": "controlled_source",
+                "expression": pel["expression"],
+                "direction": pel["direction"],
+            })
+            internal_component_idx += 1
+        elif pel["type"] == "noise_source":
+            element_node_name = f"_internal_ns_{internal_component_idx}"
+            attrs.update({
+                "instance_type": "noise_source",
+                "id": pel["id"],
+                "direction": pel["direction"],
+            })
+            internal_component_idx += 1
 
-                # Update current attach point and implicit node counter
-                current_attach_point_canonical = next_attach_point_canonical
-                if created_new_implicit_node:
-                    implicit_node_idx += 1
+        if element_node_name:
+            if not G.has_node(element_node_name):
+                G.add_node(element_node_name, **attrs)
+            G.add_edge(element_node_name, current_attach_point, terminal="par_t1", key="par_t1")
+            G.add_edge(element_node_name, next_attach_point, terminal="par_t2", key="par_t2")
 
-                elif item_type == "named_current":
-                    # TODO: Named currents are annotations on connections.
-                    # This requires identifying the specific edge representing the "wire segment".
-                    # For example, if path[i-1] was a component C, and it connected to
-                    # current_attach_point_canonical via terminal T_prev of C.
-                    # This is advanced and depends on precise edge identification.
-                    # For now, we'll skip adding it directly to the graph's structure
-                    # but it could be added as an attribute to current_attach_point_canonical
-                    # or the component connected *before* the current, if identifiable.
-                    pass
+    return internal_component_idx
+
+def ast_to_graph(parsed_statements):
+    """
+    Converts a Proto-Language AST into a graph representation.
+
+    Graph Nodes:
+        - Component Instances (e.g., "R1", "M1"):
+            Attributes: node_kind='component_instance', instance_type='R'/'Nmos'/etc.
+        - Electrical Nets (e.g., "GND", "node_gate_canonical"):
+            Attributes: node_kind='electrical_net'
+            Net names are canonicalized using DSU.
+
+    Graph Edges:
+        - Connect a component instance node to an electrical net node.
+        - Attribute: 'terminal' (e.g., 'G', 'D', 't1_series') indicating the
+          component terminal involved in the connection.
+    """
+    G = nx.MultiGraph()
+    electrical_nets_dsu = DSU()
+
+    # Initialize special nodes
+    for special_node in ["GND", "VDD"]:
+        electrical_nets_dsu.add_set(special_node)
+
+    implicit_node_idx = 0
+    internal_component_idx = 0
+
+    # Pass 1: Process declarations
+    declared_components = _process_declarations(G, parsed_statements, electrical_nets_dsu)
+
+    # Pass 2: Process connections
+    for stmt in parsed_statements:
+        stmt_type = stmt.get("type")
+        if stmt_type == "declaration":
+            continue
+        elif stmt_type == "component_connection_block":
+            _handle_component_connection(G, stmt, declared_components, electrical_nets_dsu)
+        elif stmt_type == "direct_assignment":
+            _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu)
+        elif stmt_type == "series_connection":
+            implicit_node_idx, internal_component_idx = _handle_series_connection(
+                G, stmt, declared_components, electrical_nets_dsu,
+                implicit_node_idx, internal_component_idx
+            )
 
     # TODO: Optional: Create a "cleaner" graph where all net nodes are guaranteed to be their canonical names
     # This involves relabeling or creating a new graph.

@@ -209,7 +209,7 @@ def test_valid_circuit_validator(valid_parsed_statements):
 def test_ast_utils(parsed_statements):
     summary = summarize_circuit_elements(parsed_statements)
     assert summary["num_total_nodes"] > 0, "No nodes found in circuit"
-    assert summary["num_total_components"] > 0, "No components found in circuit"
+    assert summary["total_components"] > 0, "No components found in circuit"
     assert len(summary["details"]["explicit_nodes"]) > 0, "No explicit nodes found"
 
     reconstructed = generate_proto_from_ast(parsed_statements)

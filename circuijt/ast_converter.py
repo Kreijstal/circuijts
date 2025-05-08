@@ -46,291 +46,307 @@ def _flatten_series_path(path_elements, context):
     ]
 
 
+def _find_adjacent_nodes(path, index):
+    """Find previous and next nodes in path relative to index."""
+    prev_node = next_node = None
+    for j in range(index - 1, -1, -1):
+        if path[j]["type"] == "node":
+            prev_node = path[j]["name"]
+            break
+    for j in range(index + 1, len(path)):
+        if path[j]["type"] == "node":
+            next_node = path[j]["name"]
+            break
+    return prev_node, next_node
+
+
+def _process_component_element(element, prev_node, next_node):
+    """Process a component element in series path."""
+    connections = []
+    if prev_node:
+        connections.append(
+            {
+                "type": "pin_connection",
+                "component_instance": element["name"],
+                "terminal": "p1",
+                "net": prev_node,
+            }
+        )
+    if next_node:
+        connections.append(
+            {
+                "type": "pin_connection",
+                "component_instance": element["name"],
+                "terminal": "p2",
+                "net": next_node,
+            }
+        )
+    return connections
+
+
+def _process_source_element(element, prev_node, next_node):
+    """Process a source element in series path."""
+    connections = []
+    terminal_map = {"-+": ("neg", "pos"), "+-": ("pos", "neg")}
+    first_term, second_term = terminal_map[element["polarity"]]
+    if prev_node:
+        connections.append(
+            {
+                "type": "pin_connection",
+                "component_instance": element["name"],
+                "terminal": first_term,
+                "net": prev_node,
+            }
+        )
+    if next_node:
+        connections.append(
+            {
+                "type": "pin_connection",
+                "component_instance": element["name"],
+                "terminal": second_term,
+                "net": next_node,
+            }
+        )
+    return connections
+
+
+def _process_parallel_block(element, prev_node, next_node):
+    """Process a parallel block element in series path."""
+    connections = []
+    for parallel_element in element["elements"]:
+        if parallel_element["type"] == "component":
+            if prev_node:
+                connections.append(
+                    {
+                        "type": "pin_connection",
+                        "component_instance": parallel_element["name"],
+                        "terminal": "p1",
+                        "net": prev_node,
+                    }
+                )
+            if next_node:
+                connections.append(
+                    {
+                        "type": "pin_connection",
+                        "component_instance": parallel_element["name"],
+                        "terminal": "p2",
+                        "net": next_node,
+                    }
+                )
+    return connections
+
+
+def _process_declaration(statement):
+    """Process a declaration statement."""
+    return {
+        "type": "declaration",
+        "component_type": statement["component_type"],
+        "instance_name": statement["instance_name"],
+    }
+
+
+def _process_component_connection_block(statement):
+    """Process a component connection block."""
+    connections = []
+    for conn in statement["connections"]:
+        connections.append(
+            {
+                "type": "pin_connection",
+                "component_instance": statement["component_name"],
+                "terminal": conn["terminal"],
+                "net": conn["node"],
+            }
+        )
+    return connections
+
+
+def _process_series_connection(statement, dsu, element_processors):
+    """Process a series connection statement."""
+    flattened = []
+    if "_invalid_start" not in statement:
+        for i, element in enumerate(statement["path"]):
+            if element["type"] == "node":
+                canonical_net = dsu.find(element["name"])
+                if canonical_net != element["name"]:
+                    flattened.append(
+                        {
+                            "type": "net_alias",
+                            "source_net": element["name"],
+                            "canonical_net": canonical_net,
+                        }
+                    )
+            elif element["type"] in element_processors:
+                prev_node, next_node = _find_adjacent_nodes(statement["path"], i)
+                flattened.extend(
+                    element_processors[element["type"]](element, prev_node, next_node)
+                )
+    return flattened
+
+
+def _process_direct_assignment(statement, dsu):
+    """Process a direct assignment statement."""
+    canonical = dsu.find(statement["target_node"])
+    if canonical != statement["source_node"]:
+        return {
+            "type": "net_alias",
+            "source_net": statement["source_node"],
+            "canonical_net": canonical,
+        }
+    return None
+
+
 def ast_to_flattened_ast(ast, dsu=None):
     """Convert a parsed AST to a flattened format for analysis."""
     if dsu is None:
         dsu = DSU()
 
     flattened = []
+    element_processors = {
+        "component": _process_component_element,
+        "source": _process_source_element,
+        "parallel_block": _process_parallel_block,
+    }
 
-    # Process declarations
+    statement_processors = {
+        "declaration": _process_declaration,
+        "component_connection_block": _process_component_connection_block,
+        "series_connection": lambda s: _process_series_connection(
+            s, dsu, element_processors
+        ),
+        "direct_assignment": lambda s: _process_direct_assignment(s, dsu),
+    }
+
     for statement in ast:
-        if statement["type"] == "declaration":
-            flattened.append(
-                {
-                    "type": "declaration",
-                    "component_type": statement["component_type"],
-                    "instance_name": statement["instance_name"],
-                }
-            )
-        elif statement["type"] == "component_connection_block":
-            for conn in statement["connections"]:
-                flattened.append(
-                    {
-                        "type": "pin_connection",
-                        "component_instance": statement["component_name"],
-                        "terminal": conn["terminal"],
-                        "net": conn["node"],
-                    }
-                )
-        elif statement["type"] == "series_connection":
-            if "_invalid_start" not in statement:
-                # Nodes are only used for internal path processing
-                _ = [e for e in statement["path"] if e["type"] == "node"]
-                for i, element in enumerate(statement["path"]):
-                    if element["type"] == "node":
-                        canonical_net = dsu.find(element["name"])
-                        if canonical_net != element["name"]:
-                            flattened.append(
-                                {
-                                    "type": "net_alias",
-                                    "source_net": element["name"],
-                                    "canonical_net": canonical_net,
-                                }
-                            )
-                    elif element["type"] == "component":
-                        # Find adjacent nodes
-                        prev_node = None
-                        next_node = None
-                        for j in range(i - 1, -1, -1):
-                            if statement["path"][j]["type"] == "node":
-                                prev_node = statement["path"][j]["name"]
-                                break
-                        for j in range(i + 1, len(statement["path"])):
-                            if statement["path"][j]["type"] == "node":
-                                next_node = statement["path"][j]["name"]
-                                break
-                        if prev_node:
-                            flattened.append(
-                                {
-                                    "type": "pin_connection",
-                                    "component_instance": element["name"],
-                                    "terminal": "p1",
-                                    "net": prev_node,
-                                }
-                            )
-                        if next_node:
-                            flattened.append(
-                                {
-                                    "type": "pin_connection",
-                                    "component_instance": element["name"],
-                                    "terminal": "p2",
-                                    "net": next_node,
-                                }
-                            )
-                    elif element["type"] == "source":
-                        prev_node = None
-                        next_node = None
-                        for j in range(i - 1, -1, -1):
-                            if statement["path"][j]["type"] == "node":
-                                prev_node = statement["path"][j]["name"]
-                                break
-                        for j in range(i + 1, len(statement["path"])):
-                            if statement["path"][j]["type"] == "node":
-                                next_node = statement["path"][j]["name"]
-                                break
-                        terminal_map = {"-+": ("neg", "pos"), "+-": ("pos", "neg")}
-                        first_term, second_term = terminal_map[element["polarity"]]
-                        if prev_node:
-                            flattened.append(
-                                {
-                                    "type": "pin_connection",
-                                    "component_instance": element["name"],
-                                    "terminal": first_term,
-                                    "net": prev_node,
-                                }
-                            )
-                        if next_node:
-                            flattened.append(
-                                {
-                                    "type": "pin_connection",
-                                    "component_instance": element["name"],
-                                    "terminal": second_term,
-                                    "net": next_node,
-                                }
-                            )
-                    elif element["type"] == "parallel_block":
-                        prev_node = next_node = None
-                        for j in range(i - 1, -1, -1):
-                            if statement["path"][j]["type"] == "node":
-                                prev_node = statement["path"][j]["name"]
-                                break
-                        for j in range(i + 1, len(statement["path"])):
-                            if statement["path"][j]["type"] == "node":
-                                next_node = statement["path"][j]["name"]
-                                break
-
-                        for parallel_element in element["elements"]:
-                            if parallel_element["type"] == "component":
-                                if prev_node:
-                                    flattened.append(
-                                        {
-                                            "type": "pin_connection",
-                                            "component_instance": parallel_element[
-                                                "name"
-                                            ],
-                                            "terminal": "p1",
-                                            "net": prev_node,
-                                        }
-                                    )
-                                if next_node:
-                                    flattened.append(
-                                        {
-                                            "type": "pin_connection",
-                                            "component_instance": parallel_element[
-                                                "name"
-                                            ],
-                                            "terminal": "p2",
-                                            "net": next_node,
-                                        }
-                                    )
-        elif statement["type"] == "direct_assignment":
-            source = statement["source_node"]
-            target = statement["target_node"]
-            canonical = dsu.find(target)
-            if canonical != source:
-                flattened.append(
-                    {
-                        "type": "net_alias",
-                        "source_net": source,
-                        "canonical_net": canonical,
-                    }
-                )
+        if statement["type"] in statement_processors:
+            result = statement_processors[statement["type"]](statement)
+            if isinstance(result, list):
+                flattened.extend(result)
+            elif result is not None:
+                flattened.append(result)
 
     return flattened
 
 
+def _process_parallel_node_elements(elements):
+    """Process elements within a parallel block for node creation."""
+    processed = []
+    for element in elements:
+        if element["type"] == "component_instance":
+            processed.append({"type": "component", "name": element["name"]})
+        elif element["type"] in ("controlled_source", "noise_source"):
+            processed.append(
+                {
+                    "type": element["type"],
+                    **{k: element[k] for k in element if k != "type"},
+                }
+            )
+    return processed
+
+
 def _create_node_elements(elements):
     """Helper function to create node elements for regular AST."""
-    node_elements = []
-    for element in elements:
-        if element["type"] == "node":
-            node_elements.append({"type": "node", "name": element["name"]})
-        elif element["type"] == "component_instance":
-            node_elements.append({"type": "component", "name": element["name"]})
-        elif element["type"] == "voltage_source":
-            node_elements.append(
-                {
-                    "type": "source",
-                    "name": element["name"],
-                    "polarity": element["polarity"],
-                }
-            )
-        elif element["type"] == "named_current":
-            node_elements.append(
-                {
-                    "type": "named_current",
-                    "name": element["name"],
-                    "direction": element["direction"],
-                }
-            )
-        elif element["type"] == "parallel_block":
-            parallel_elements = []
-            for parallel_element in element["elements"]:
-                if parallel_element["type"] == "component_instance":
-                    parallel_elements.append(
-                        {"type": "component", "name": parallel_element["name"]}
-                    )
-                elif parallel_element["type"] == "controlled_source":
-                    parallel_elements.append(
-                        {
-                            "type": "controlled_source",
-                            "expression": parallel_element["expression"],
-                            "direction": parallel_element["direction"],
-                        }
-                    )
-                elif parallel_element["type"] == "noise_source":
-                    parallel_elements.append(
-                        {
-                            "type": "noise_source",
-                            "id": parallel_element["id"],
-                            "direction": parallel_element["direction"],
-                        }
-                    )
-            node_elements.append(
-                {"type": "parallel_block", "elements": parallel_elements}
-            )
-    return node_elements
+    type_handlers = {
+        "node": lambda e: {"type": "node", "name": e["name"]},
+        "component_instance": lambda e: {"type": "component", "name": e["name"]},
+        "voltage_source": lambda e: {
+            "type": "source",
+            "name": e["name"],
+            "polarity": e["polarity"],
+        },
+        "named_current": lambda e: {
+            "type": "named_current",
+            "name": e["name"],
+            "direction": e["direction"],
+        },
+        "parallel_block": lambda e: {
+            "type": "parallel_block",
+            "elements": _process_parallel_node_elements(e["elements"]),
+        },
+    }
+
+    return [type_handlers[e["type"]](e) for e in elements if e["type"] in type_handlers]
 
 
-def flattened_ast_to_regular_ast(flattened_ast):
-    """Convert a flattened AST back to regular format."""
-    regular_ast = []
-
-    # Group by type to reconstruct the AST  # noqa: W293
-    declarations = [s for s in flattened_ast if s["type"] == "declaration"]
-    pin_connections = [s for s in flattened_ast if s["type"] == "pin_connection"]
-
-    # Process declarations  # noqa: W293
-    for decl in declarations:
-        regular_ast.append(
-            {
-                "type": "declaration",
-                "component_type": decl["component_type"],
-                "instance_name": decl["instance_name"],
-            }
-        )
-
-    # Group pin connections by nodes  # noqa: W293
-    node_components = {}
-    for pin in pin_connections:
-        net = pin["net"]
-        if net not in node_components:
-            node_components[net] = []
-        node_components[net].append((pin["component_instance"], pin["terminal"]))
-
-    # Find parallel structures  # noqa: W293
-    net_pairs = []
+def _find_net_pairs(pin_connections):
+    """Find all unique net pairs connected by components."""
+    net_pairs = set()
     for pin in pin_connections:
         for other_pin in pin_connections:
             if (
                 pin["component_instance"] == other_pin["component_instance"]
                 and pin["terminal"] != other_pin["terminal"]
             ):
-                net_pair = tuple(sorted([pin["net"], other_pin["net"]]))
-                if net_pair not in net_pairs:
-                    net_pairs.append(net_pair)
+                net_pairs.add(tuple(sorted((pin["net"], other_pin["net"]))))
+    return net_pairs
 
-    # Construct series paths with parallel blocks  # noqa: W293
+
+def _build_ast_path(net1, net2, components, node_components, pin_connections):
+    """Build AST path segment between two nets."""
+    if len(components) > 1:
+        return {
+            "type": "series_connection",
+            "path": [
+                {"type": "node", "name": net1},
+                {
+                    "type": "parallel_block",
+                    "elements": [
+                        {"type": "component", "name": comp} for comp in components
+                    ],
+                },
+                {"type": "node", "name": net2},
+            ],
+        }
+    elif len(components) == 1:
+        return {
+            "type": "series_connection",
+            "path": [
+                {"type": "node", "name": net1},
+                {"type": "component", "name": components[0]},
+                {"type": "node", "name": net2},
+            ],
+        }
+    return None
+
+
+def flattened_ast_to_regular_ast(flattened_ast):
+    """Convert a flattened AST back to regular format."""
+    regular_ast = []
+
+    # Process declarations
+    regular_ast.extend(
+        {
+            "type": "declaration",
+            "component_type": d["component_type"],
+            "instance_name": d["instance_name"],
+        }
+        for d in flattened_ast
+        if d["type"] == "declaration"
+    )
+
+    # Group pin connections by nodes
+    pin_connections = [s for s in flattened_ast if s["type"] == "pin_connection"]
+    node_components = {}
+    for pin in pin_connections:
+        node_components.setdefault(pin["net"], []).append(
+            (pin["component_instance"], pin["terminal"])
+        )
+
+    # Process net pairs
+    net_pairs = _find_net_pairs(pin_connections)
     for net1, net2 in net_pairs:
-        components = []
-        for comp, term in node_components.get(net1, []):
+        components = [
+            comp
+            for comp, term in node_components.get(net1, [])
             if any(
                 p["component_instance"] == comp and p["net"] == net2
                 for p in pin_connections
                 if p["terminal"] != term
-            ):
-                components.append(comp)
-
-        if len(components) > 1:  # noqa: W293
-            # This is a parallel block
-            regular_ast.append(
-                {
-                    "type": "series_connection",
-                    "path": [
-                        {"type": "node", "name": net1},
-                        {
-                            "type": "parallel_block",
-                            "elements": [
-                                {"type": "component", "name": comp}
-                                for comp in components
-                            ],
-                        },
-                        {"type": "node", "name": net2},
-                    ],
-                }
             )
-        elif len(components) == 1:
-            # Single component
-            regular_ast.append(
-                {
-                    "type": "series_connection",
-                    "path": [
-                        {"type": "node", "name": net1},
-                        {"type": "component", "name": components[0]},
-                        {"type": "node", "name": net2},
-                    ],
-                }
-            )
+        ]
 
-    return regular_ast  # noqa: W293
+        if path := _build_ast_path(
+            net1, net2, components, node_components, pin_connections
+        ):
+            regular_ast.append(path)
+
+    return regular_ast

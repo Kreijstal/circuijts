@@ -12,7 +12,7 @@ def summarize_circuit_elements(parsed_statements):
         "total_resistors": 0,
         "total_capacitors": 0,
         "total_voltages": 0,
-        "total_parallel_blocks": 0
+        "total_parallel_blocks": 0,
     }
 
     for stmt in parsed_statements:
@@ -106,13 +106,13 @@ def summarize_circuit_elements(parsed_statements):
     return {
         "num_total_nodes": len(all_nodes_combined),
         "node_list": sorted(list(all_nodes_combined)),
-        "total_components": len(declared_component_instances),  # Changed from num_total_components
+        "total_components": len(declared_component_instances),
         "component_list": sorted(list(declared_component_instances)),
         "details": {
             "explicit_nodes": sorted(list(explicit_nodes)),
             "implicit_nodes": sorted(list(implicit_nodes_generated)),
         },
-        **component_counts
+        **component_counts,
     }
 
 
@@ -248,5 +248,6 @@ def find_declarations_by_type(statements, component_type):
     return [
         stmt
         for stmt in statements
-        if stmt.get("type") == "declaration" and stmt.get("component_type") == component_type
+        if stmt.get("type") == "declaration"
+        and stmt.get("component_type") == component_type
     ]

@@ -570,7 +570,9 @@ def test_graph_to_ast_connections():
         reconstructed_ast = graph_to_structured_ast(graph, dsu)
 
         # Verify series connections
-        series_connections = [s for s in reconstructed_ast if s["type"] == "series_connection"]
+        series_connections = [
+            s for s in reconstructed_ast if s["type"] == "series_connection"
+        ]
         assert series_connections, "No series connections found in reconstructed AST"
 
         # Check all components are present in connections

@@ -96,7 +96,9 @@ def test_roundtrip_conversion():
             if stmt["type"] == "series_connection":
                 print(f"Path elements: {stmt['path']}")
 
-    assert parallel_found, "Parallel structure (R1 || C1) not preserved in reconstruction"
+    assert (
+        parallel_found
+    ), "Parallel structure (R1 || C1) not preserved in reconstruction"
 
 
 def _debug_print_flattened(flattened):
@@ -128,7 +130,9 @@ def _debug_print_reconstructed(reconstructed):
                 elif el["type"] == "component":
                     path_desc.append(el["name"])
                 elif el["type"] == "parallel_block":
-                    components = [e["name"] for e in el["elements"] if e["type"] == "component"]
+                    components = [
+                        e["name"] for e in el["elements"] if e["type"] == "component"
+                    ]
                     path_desc.append(f"[{' || '.join(components)}]")
             print(f"  Series path: {' -- '.join(path_desc)}")
 
@@ -139,7 +143,9 @@ def _check_parallel_structure(reconstructed):
         if stmt["type"] == "series_connection":
             for el in stmt["path"]:
                 if el["type"] == "parallel_block":
-                    components = {e["name"] for e in el["elements"] if e["type"] == "component"}
+                    components = {
+                        e["name"] for e in el["elements"] if e["type"] == "component"
+                    }
                     if components == {"R1", "C1"}:
                         return True
     return False

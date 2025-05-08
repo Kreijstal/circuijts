@@ -183,10 +183,8 @@ class ASTValidator:
                     )
                     continue
 
-                is_structurally_valid_path = (
-                    len(path) > 1 or
-                    (len(path) == 1 and
-                     path[0].get("type") not in ["node", "error"])
+                is_structurally_valid_path = len(path) > 1 or (
+                    len(path) == 1 and path[0].get("type") not in ["node", "error"]
                 )
                 if not is_structurally_valid_path and path:
                     first_el_info = path[0].get("name", str(path[0]))
@@ -230,7 +228,9 @@ class ASTValidator:
                                 line_num,
                             )
                         else:
-                            _ = self.declared_component_types[source_name]["type"]  # noqa: F841
+                            _ = self.declared_component_types[source_name][
+                                "type"
+                            ]  # noqa: F841
                             # TODO: Allow any declared type for a source in path for now,
                             # but in the future add specific type checks (e.g. 'V' for voltage)
                             # For now, just ensure it's declared.
