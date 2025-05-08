@@ -7,10 +7,12 @@ Creates output in a 'small_signal_models' subdirectory.
 import os
 import sys
 import argparse
+import pprint # Added for debug dumping
 from circuijt.parser import ProtoCircuitParser
 from circuijt.validator import CircuitValidator
 from circuijt.graph_utils import ast_to_graph, get_component_connectivity, get_preferred_net_name_for_reconstruction
 
+# Functions generate_nmos_small_signal_model, generate_pmos_small_signal_model remain unchanged...
 def generate_nmos_small_signal_model(nmos_name, external_nets_map):
     """Generate small signal model AST for an NMOS transistor."""
     id_suffix = nmos_name[1:] if nmos_name.startswith('M') else nmos_name
@@ -121,7 +123,8 @@ def generate_pmos_small_signal_model(pmos_name, external_nets_map):
                       f"{external_nets_map.get('S','S')}"
     }
 
-def process_circuit_file(input_file, output_dir=None, stdout=False):
+
+def process_circuit_file(input_file, output_dir=None, stdout=False, debug_dump=False): # Added debug_dump
     """Process a circuit file and generate small signal models."""
     if not stdout:
         os.makedirs(output_dir, exist_ok=True)
@@ -135,14 +138,36 @@ def process_circuit_file(input_file, output_dir=None, stdout=False):
         circuit_text = f.read()
     
     ast, errors = parser.parse_text(circuit_text)
+
+    if debug_dump:
+        print("\n--- DEBUG DUMP: Initial AST (from parser) ---")
+        pprint.pprint(ast)
+        if errors:
+            print("\n--- DEBUG DUMP: Parser Errors ---")
+            pprint.pprint(errors)
+
     if errors:
         print(f"Parser errors in {input_file}:")
         for error in errors:
             print(error)
-        return
+        # Decide whether to return or proceed. For SSM generation, errors are critical.
+        if not ast: # If AST is empty due to errors
+             print("Critical parsing errors, cannot proceed with SSM generation.")
+             return
+
 
     # Find all MOS transistors (both NMOS and PMOS)
     graph, dsu = ast_to_graph(ast)
+
+    if debug_dump:
+        print("\n--- DEBUG DUMP: Graph Structure ---")
+        print("Nodes:")
+        pprint.pprint(list(graph.nodes(data=True)))
+        print("Edges:")
+        pprint.pprint(list(graph.edges(data=True)))
+        print("DSU Parent Map:")
+        pprint.pprint(dsu.parent)
+
     nmos_transistors = [
         node for node, data in graph.nodes(data=True)
         if data.get('node_kind') == 'component_instance'
@@ -203,6 +228,10 @@ def process_circuit_file(input_file, output_dir=None, stdout=False):
             f"Model: {rule_data}\n"
             "----------------------------------------\n"
         )
+    
+    if debug_dump:
+        print("\n--- DEBUG DUMP: Generated Small-Signal Model AST (all_model_statements) ---")
+        pprint.pprint(all_model_statements)
 
     # Convert AST to circuit code
     from circuijt.ast_utils import generate_proto_from_ast
@@ -248,9 +277,14 @@ def main():
         action='store_true',
         help='Print output to stdout instead of files'
     )
+    parser.add_argument( # Added debug_dump argument
+        '--debug-dump',
+        action='store_true',
+        help='Dump intermediate AST and graph structures for debugging'
+    )
     
     args = parser.parse_args()
-    process_circuit_file(args.circuit_file, args.output_dir, args.stdout)
+    process_circuit_file(args.circuit_file, args.output_dir, args.stdout, args.debug_dump) # Pass debug_dump
 
 if __name__ == '__main__':
     main()
