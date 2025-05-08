@@ -176,6 +176,15 @@ def ast_to_graph(parsed_statements):
 
                 G.add_edge(comp_node_name, canonical_net_name, terminal=terminal_name)
 
+                # MODIFICATION START: Ensure connectivity for referenced device terminals
+                if '.' in explicit_net_name_in_connection:
+                    referenced_comp_name, referenced_term_name = explicit_net_name_in_connection.split('.', 1)
+                    if referenced_comp_name in declared_components:
+                        # Connect the referenced component (e.g., M1) to this same canonical_net_name
+                        # (which is find(M1.D)) via its specified terminal (e.g., D).
+                        G.add_edge(referenced_comp_name, canonical_net_name, terminal=referenced_term_name)
+                # MODIFICATION END
+
         elif stmt_type == 'direct_assignment':
             s_node, t_node = stmt['source_node'], stmt['target_node']
             electrical_nets_dsu.union(s_node, t_node)
@@ -200,9 +209,17 @@ def ast_to_graph(parsed_statements):
                 continue
 
             # `current_attach_point` is always the canonical name of an electrical net.
-            current_attach_point_canonical = electrical_nets_dsu.find(path[0]['name'])
+            start_node_original_name = path[0]['name']
+            current_attach_point_canonical = electrical_nets_dsu.find(start_node_original_name)
             if not G.has_node(current_attach_point_canonical):
                  G.add_node(current_attach_point_canonical, node_kind='electrical_net')
+
+            # MODIFICATION START: Ensure connectivity for start node if it's a device terminal
+            if '.' in start_node_original_name:
+                comp_part, term_part = start_node_original_name.split('.', 1)
+                if comp_part in declared_components:
+                    G.add_edge(comp_part, current_attach_point_canonical, terminal=term_part)
+            # MODIFICATION END
 
             # Process elements from the second item onwards
             for i in range(1, len(path)):
@@ -267,10 +284,18 @@ def ast_to_graph(parsed_statements):
                     if is_next_point_implicit: implicit_node_idx += 1
 
                 elif item_type == 'node': # This node becomes the new current_attach_point
-                    current_attach_point_canonical = electrical_nets_dsu.find(item['name'])
+                    original_node_name_in_path = item['name']
+                    current_attach_point_canonical = electrical_nets_dsu.find(original_node_name_in_path)
                     # Ensure it exists in graph (should from pre-scan or previous step)
                     if not G.has_node(current_attach_point_canonical):
                          G.add_node(current_attach_point_canonical, node_kind='electrical_net')
+                    
+                    # MODIFICATION START: Ensure connectivity for intermediate nodes if they are device terminals
+                    if '.' in original_node_name_in_path:
+                        comp_part, term_part = original_node_name_in_path.split('.', 1)
+                        if comp_part in declared_components:
+                            G.add_edge(comp_part, current_attach_point_canonical, terminal=term_part)
+                    # MODIFICATION END
 
                 elif item_type == 'parallel_block':
                     parallel_start_node_canonical = current_attach_point_canonical
