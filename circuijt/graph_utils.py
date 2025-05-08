@@ -163,38 +163,6 @@ def _handle_direct_assignment(G, stmt, declared_components, electrical_nets_dsu)
                 G.add_edge(comp_name, canonical_net, terminal=term)
 
 
-def ast_to_graph(parsed_statements):
-    """
-    Converts a Proto-Language AST into a graph representation.
-
-    Graph Nodes:
-        - Component Instances (e.g., "R1", "M1"):
-            Attributes: node_kind='component_instance', instance_type='R'/'Nmos'/etc.
-        - Electrical Nets (e.g., "GND", "node_gate_canonical"):
-            Attributes: node_kind='electrical_net'
-            Net names are canonicalized using DSU.
-
-    Graph Edges:
-        - Connect a component instance node to an electrical net node.
-        - Attribute: 'terminal' (e.g., 'G', 'D', 't1_series') indicating the
-          component terminal involved in the connection.
-    """
-    G = nx.MultiGraph()
-    electrical_nets_dsu = DSU()
-
-    # Initialize special nodes
-    for special_node in ["GND", "VDD"]:
-        electrical_nets_dsu.add_set(special_node)
-
-    implicit_node_idx = 0
-    internal_component_idx = 0
-
-    # Pass 1: Process declarations
-    declared_components = _process_declarations(
-        G, parsed_statements, electrical_nets_dsu
-    )
-
-
 def _handle_series_connection(
     G,
     stmt,

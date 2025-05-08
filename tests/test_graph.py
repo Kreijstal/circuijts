@@ -137,12 +137,12 @@ def test_parallel_graph():
         }
 
     except AssertionError as e:
-        print("\\n--- Test Failed: test_parallel_graph ---")
-        print(f"Circuit:\\n{circuit}")
-        print(f"Parser errors: {errors}")
-        print(f"Graph nodes: {list(graph.nodes(data=True))}")
-        print(f"Graph edges: {list(graph.edges(data=True))}")
-        print(f"DSU parents: {dsu.parent}")
+        print("\n--- Test Failed: test_parallel_graph ---")
+        print("Circuit:\n", circuit)
+        print("Parser errors:", errors)
+        print("Graph nodes:", list(graph.nodes(data=True)))
+        print("Graph edges:", list(graph.edges(data=True)))
+        print("DSU parents:", dsu.parent)
         raise e
 
 
@@ -210,12 +210,12 @@ def test_transistor_graph():
             len(terminals_connected_to_nets) == 4
         )  # Ensure all 4 terminals were processed
     except AssertionError as e:
-        print("\\n--- Test Failed: test_transistor_graph ---")
-        print(f"Circuit:\\n{circuit}")
-        print(f"Parser errors: {errors}")
-        print(f"Graph nodes: {list(graph.nodes(data=True))}")
-        print(f"Graph edges: {list(graph.edges(data=True))}")
-        print(f"DSU parents: {dsu.parent}")
+        print("\n--- Test Failed: test_transistor_graph ---")
+        print("Circuit:\n", circuit)
+        print("Parser errors:", errors)
+        print("Graph nodes:", list(graph.nodes(data=True)))
+        print("Graph edges:", list(graph.edges(data=True)))
+        print("DSU parents:", dsu.parent)
         raise e
 
 
@@ -279,12 +279,12 @@ def test_voltage_source_graph():
             "t2_series"
         )  # Must connect to two different nets
     except AssertionError as e:
-        print("\\n--- Test Failed: test_voltage_source_graph ---")
-        print(f"Circuit:\\n{circuit}")
-        print(f"Parser errors: {errors}")
-        print(f"Graph nodes: {list(graph.nodes(data=True))}")
-        print(f"Graph edges: {list(graph.edges(data=True))}")
-        print(f"DSU parents: {dsu.parent}")
+        print("\n--- Test Failed: test_voltage_source_graph ---")
+        print("Circuit:\n", circuit)
+        print("Parser errors:", errors)
+        print("Graph nodes:", list(graph.nodes(data=True)))
+        print("Graph edges:", list(graph.edges(data=True)))
+        print("DSU parents:", dsu.parent)
         raise e
 
 
@@ -360,12 +360,12 @@ def test_complex_circuit_graph():
             m1_connections_from_graph.get("S") == gnd_canonical
         )  # From (M1.S):(GND) via DSU
     except AssertionError as e:
-        print("\\n--- Test Failed: test_complex_circuit_graph ---")
-        print(f"Circuit:\\n{circuit}")
-        print(f"Parser errors: {errors}")
-        print(f"Graph nodes: {list(graph.nodes(data=True))}")
-        print(f"Graph edges: {list(graph.edges(data=True))}")
-        print(f"DSU parents: {dsu.parent}")
+        print("\n--- Test Failed: test_complex_circuit_graph ---")
+        print("Circuit:\n", circuit)
+        print("Parser errors:", errors)
+        print("Graph nodes:", list(graph.nodes(data=True)))
+        print("Graph edges:", list(graph.edges(data=True)))
+        print("DSU parents:", dsu.parent)
         raise e
 
 
@@ -418,10 +418,10 @@ def test_voltage_source_polarity_variations():
             v_rev_connections[data["terminal"]] = net_node
         assert (
             v_rev_connections.get("pos") == n3_c
-        ), "V_rev pos expected {}, got {}".format(n3_c, v_rev_connections.get("pos"))
+        ), f"V_rev pos expected {n3_c}, got {v_rev_connections.get('pos')}"
         assert (
             v_rev_connections.get("neg") == n4_c
-        ), "V_rev neg expected {}, got {}".format(n4_c, v_rev_connections.get("neg"))
+        ), f"V_rev neg expected {n4_c}, got {v_rev_connections.get('neg')}"
 
         # Check R1 and R2 connections to ensure graph integrity
         assert graph.has_edge("R1", n2_c) or graph.has_edge(n2_c, "R1")
@@ -429,12 +429,12 @@ def test_voltage_source_polarity_variations():
         assert graph.has_edge("R2", n4_c) or graph.has_edge(n4_c, "R2")
         assert graph.has_edge("R2", gnd_c) or graph.has_edge(gnd_c, "R2")
     except AssertionError as e:
-        print("\\n--- Test Failed: test_voltage_source_polarity_variations ---")
-        print(f"Circuit:\\n{circuit}")
-        print(f"Parser errors: {errors}")
-        print(f"Graph nodes: {list(graph.nodes(data=True))}")
-        print(f"Graph edges: {list(graph.edges(data=True))}")
-        print(f"DSU parents: {dsu.parent}")
+        print("\n--- Test Failed: test_voltage_source_polarity_variations ---")
+        print("Circuit:\n", circuit)
+        print("Parser errors:", errors)
+        print("Graph nodes:", list(graph.nodes(data=True)))
+        print("Graph edges:", list(graph.edges(data=True)))
+        print("DSU parents:", dsu.parent)
         raise e
 
 
@@ -472,7 +472,10 @@ def test_no_duplicate_parallel_elements():
         assert r_par1_neighbors == {
             in_c,
             mid_c,
-        }, f"R_par1 connections incorrect. Expected {in_c, mid_c}, got {r_par1_neighbors}"
+        }, (
+            f"R_par1 connections incorrect. Expected {in_c, mid_c}, "
+            f"got {r_par1_neighbors}"
+        )
 
         # Check connections for R_par2
         r_par2_neighbors = set()
@@ -482,7 +485,10 @@ def test_no_duplicate_parallel_elements():
         assert r_par2_neighbors == {
             in_c,
             mid_c,
-        }, f"R_par2 connections incorrect. Expected {in_c, mid_c}, got {r_par2_neighbors}"
+        }, (
+            f"R_par2 connections incorrect. Expected {in_c, mid_c}, "
+            f"got {r_par2_neighbors}"
+        )
 
         # Check number of edges for R_par1 and R_par2 (should be 2 each, one to 'in', one to 'mid')
         assert (
@@ -495,9 +501,9 @@ def test_no_duplicate_parallel_elements():
         print("\\n--- Test Failed: test_no_duplicate_parallel_elements ---")
         print(f"Circuit:\\n{circuit}")
         print(f"Parser errors: {errors}")
-        print(f"Graph nodes: {list(graph.nodes(data=True))}")
-        print(f"Graph edges: {list(graph.edges(data=True))}")
-        print(f"DSU parents: {dsu.parent}")
+        print("Graph nodes:", list(graph.nodes(data=True)))
+        print("Graph edges:", list(graph.edges(data=True)))
+        print("DSU parents:", dsu.parent)
         raise e
 
 
