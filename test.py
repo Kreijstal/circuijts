@@ -260,20 +260,26 @@ def perform_nmos_ss_transformation_and_flatten(initial_circuit_code: str, nmos_t
         return
 
     # Get original NMOS connections
+    print(f"\n2. Building Graph_initial from AST_initial to find connections for '{nmos_to_replace}'...")
     initial_graph, initial_dsu = ast_to_graph(initial_ast)
+    assert initial_graph is not None, "Initial graph should not be None."
+    print(f"  Graph_initial: {len(initial_graph.nodes())} nodes, {len(initial_graph.edges())} edges.")
+    print(f"  Graph_initial nodes: {list(initial_graph.nodes(data=True))}") # Verbose
+    print(f"  DSU_initial (first 5 items): {dict(list(initial_dsu.parent.items())[:5])}")
+
     nmos_external_connections = {}
     if nmos_to_replace in initial_graph:
         node_data = initial_graph.nodes[nmos_to_replace]
         if node_data.get('node_kind') == 'component_instance' and node_data.get('instance_type') == 'Nmos':
+            print(f"  Found NMOS instance '{nmos_to_replace}' with connections:")
             for u, v, edge_data in initial_graph.edges(nmos_to_replace, data=True):
                 terminal = edge_data.get('terminal')
-                # Ensure neighbor is an electrical net
-                net_node_graph_name = v if u == nmos_to_replace else u # This is already canonical from ast_to_graph
+                net_node_graph_name = v if u == nmos_to_replace else u
                 if initial_graph.nodes[net_node_graph_name].get('node_kind') == 'electrical_net':
-                    # Get the preferred *user-facing* name for this canonical net for the model generation
                     preferred_net_name = get_preferred_net_name_for_reconstruction(
                         net_node_graph_name, initial_dsu, allow_implicit_if_only_option=True)
                     nmos_external_connections[terminal] = preferred_net_name
+                    print(f"    Terminal {terminal} -> Net {net_node_graph_name} (preferred: {preferred_net_name})")
         else:
             print(f"Error: '{nmos_to_replace}' is not an NMOS instance in the graph.")
             return
@@ -281,16 +287,20 @@ def perform_nmos_ss_transformation_and_flatten(initial_circuit_code: str, nmos_t
         print(f"Error: Instance '{nmos_to_replace}' not found in the graph.")
         return
     
-    print(f"\nOriginal connections for {nmos_to_replace}: {nmos_external_connections}")
+    print(f"\nOriginal connections for {nmos_to_replace} (used for model generation): {nmos_external_connections}")
+    assert nmos_external_connections, f"No external connections found for {nmos_to_replace}."
 
     # Generate AST for small-signal model
+    print("\n3. Generating AST_ss_model (Small-Signal Model parts)...")
     ss_model_ast_stmts = generate_nmos_small_signal_model_ast(nmos_to_replace, nmos_external_connections)
+    print("AST_ss_model:")
+    for i, stmt in enumerate(ss_model_ast_stmts): print(f"  [{i:02d}] {stmt}")
+    assert ss_model_ast_stmts, "Small-signal model AST should not be empty."
 
     # Combine ASTs
+    print("\n4. Combining AST_initial (filtered) and AST_ss_model into AST_combined...")
     combined_ast_statements = []
-    
-    # Add declarations from original (excluding replaced NMOS) and from SS model
-    processed_declarations = set() # To avoid duplicates if ss_model adds pre-existing ones
+    processed_declarations = set()
     for stmt in initial_ast:
         if stmt['type'] == 'declaration':
             if stmt['instance_name'] == nmos_to_replace: continue
@@ -303,28 +313,55 @@ def perform_nmos_ss_transformation_and_flatten(initial_circuit_code: str, nmos_t
                 combined_ast_statements.append(ss_stmt)
                 processed_declarations.add(ss_stmt['instance_name'])
     
-    # Add connection statements from original (excluding those involving replaced NMOS directly)
-    # and all connection statements from SS model
     for stmt in initial_ast:
         if stmt['type'] != 'declaration':
-            # Simple filtering: if a connection block is for the replaced NMOS, skip it.
             if stmt['type'] == 'component_connection_block' and stmt['component_name'] == nmos_to_replace:
                 continue
-            # More robust filtering would involve checking if any element in a series path
-            # or direct assignment refers to the nmos_to_replace instance or its terminals.
-            # For now, this simple filter might be okay if the SS model re-establishes all needed connections.
+            # More robust filtering
+            if nmos_to_replace in str(stmt):
+                # Check if it's a series path involving the NMOS
+                is_related_series = False
+                if stmt['type'] == 'series_connection':
+                    for item in stmt.get('path', []):
+                        if item.get('type') == 'component' and item.get('name') == nmos_to_replace:
+                            is_related_series = True; break
+                        if item.get('type') == 'node' and item.get('name', '').startswith(nmos_to_replace + "."):
+                            is_related_series = True; break
+                if is_related_series:
+                    print(f"  Skipping original series stmt potentially related to {nmos_to_replace}: {stmt}")
+                    continue
+                # Check direct assignments involving the NMOS or its terminals
+                is_related_direct_assign = False
+                if stmt['type'] == 'direct_assignment':
+                    if stmt.get('source_node','').startswith(nmos_to_replace + ".") or \
+                       stmt.get('target_node','').startswith(nmos_to_replace + "."):
+                       is_related_direct_assign = True
+                if is_related_direct_assign:
+                    print(f"  Skipping original direct assignment stmt related to {nmos_to_replace}: {stmt}")
+                    continue
+
             combined_ast_statements.append(stmt)
 
     for ss_stmt in ss_model_ast_stmts:
         if ss_stmt['type'] != 'declaration':
             combined_ast_statements.append(ss_stmt)
+    
+    print("AST_combined (Transformed):")
+    for i, stmt in enumerate(combined_ast_statements): print(f"  [{i:02d}] {stmt}")
+    assert combined_ast_statements, "Combined AST should not be empty."
 
     # Generate graph and DSU from the combined (transformed) AST
-    # This graph and DSU represent the state *after* the NMOS model is inserted.
+    print("\n5. Building Graph_transformed and DSU_transformed from AST_combined...")
     final_transformed_graph, final_transformed_dsu = ast_to_graph(combined_ast_statements)
-    
+    assert final_transformed_graph is not None, "Final transformed graph should not be None."
+    print(f"  Graph_transformed: {len(final_transformed_graph.nodes())} nodes, {len(final_transformed_graph.edges())} edges.")
+    print(f"  Graph_transformed nodes: {list(final_transformed_graph.nodes(data=True))}") # Verbose
+    print(f"  DSU_transformed (first 5 items): {dict(list(final_transformed_dsu.parent.items())[:5])}")
+
     # Generate final flattened AST using the DSU from the transformed circuit
+    print("\n6. Generating AST_flattened from AST_combined and DSU_transformed...")
     final_flattened_ast = ast_to_flattened_ast(combined_ast_statements, final_transformed_dsu)
+    assert final_flattened_ast is not None, "Final flattened AST should not be None."
 
     print("\n--- Resulting Flattened AST ---")
     if not final_flattened_ast:
