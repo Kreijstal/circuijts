@@ -453,15 +453,13 @@ def graph_to_structured_ast(graph, dsu):
     # 3. Reconstruct series/parallel paths for remaining components (including internal behavioral ones)
     net_pair_to_components = {}
     # Include both declared components and internal behavioral components
-    #all_comp_names_in_graph = sorted([
-    #    n for n, data in component_nodes_data.items()
-    #    if (data.get('instance_type') and
-    #       (not n.startswith('_internal_') or
-    #       data.get('instance_type') in ['controlled_source', 'noise_source'])
-    #])        remaining_for_paths = [c for c in all_declared_comp_names if c not in processed_components]
-
-    #remaining_for_paths = [c for c in all_comp_names_in_graph if c not in processed_components]
-    remaining_for_paths = [c for c in all_declared_comp_names if c not in processed_components]
+    all_comp_names_in_graph = sorted([
+        n for n, data in component_nodes_data.items()
+        if data.get('instance_type') and
+           (not n.startswith('_internal_') or
+            data.get('instance_type') in ['controlled_source', 'noise_source'])
+    ])
+    remaining_for_paths = [c for c in all_comp_names_in_graph if c not in processed_components]
 
     for comp_name in remaining_for_paths:
         comp_data = component_nodes_data[comp_name]
