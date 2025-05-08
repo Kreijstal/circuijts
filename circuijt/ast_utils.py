@@ -177,6 +177,80 @@ def _process_parallel_block(
             node_map.add(error_id)
 
 
+def _proto_handle_declaration(stmt):
+    """Handle declaration statement type for proto generation."""
+    return f"{stmt['component_type']} {stmt['instance_name']}"
+
+
+def _proto_handle_component_connection_block(stmt):
+    """Handle component connection block statement type for proto generation."""
+    assignments = [
+        f"{conn['terminal']}:({conn['node']})" for conn in stmt.get("connections", [])
+    ]
+    return f"{stmt['component_name']} {{ {', '.join(assignments)} }}"
+
+
+def _proto_handle_direct_assignment(stmt):
+    """Handle direct assignment statement type for proto generation."""
+    return f"({stmt['source_node']}):({stmt['target_node']})"
+
+
+def _proto_handle_series_connection(stmt):
+    """Handle series connection statement type for proto generation."""
+    path_parts = []
+    for item in stmt.get("path", []):
+        item_type = item.get("type")
+        if item_type == "node":
+            path_parts.append(f"({item['name']})")
+        elif item_type == "component":
+            path_parts.append(item["name"])
+        elif item_type == "source":
+            path_parts.append(f"{item['name']} ({item['polarity']})")
+        elif item_type == "named_current":
+            path_parts.append(f"{item['direction']}{item['name']}")
+        elif item_type == "parallel_block":
+            path_parts.append(_proto_handle_parallel_block(item))
+        elif item_type == "error":
+            path_parts.append(
+                f"<ERROR_IN_PATH: {item.get('message', 'Malformed element')}>"
+            )
+        else:
+            path_parts.append(f"<UNKNOWN_PATH_TYPE: {item_type}>")
+    return " -- ".join(path_parts)
+
+
+def _proto_handle_parallel_block(item):
+    """Handle parallel block elements for proto generation."""
+    elements_strs = []
+    for pel in item.get("elements", []):
+        pel_type = pel.get("type")
+        if pel_type == "component":
+            elements_strs.append(pel["name"])
+        elif pel_type == "controlled_source":
+            elements_strs.append(f"{pel['expression']} ({pel['direction']})")
+        elif pel_type == "noise_source":
+            elements_strs.append(f"{pel['id']} ({pel['direction']})")
+        elif pel_type == "error":
+            elements_strs.append(
+                f"<ERROR_IN_PARALLEL: {pel.get('message', 'Malformed element')}>"
+            )
+        else:
+            elements_strs.append(f"<UNKNOWN_PARALLEL_TYPE: {pel_type}>")
+    return f"[ {' || '.join(elements_strs)} ]"
+
+
+def _proto_handle_error(stmt):
+    """Handle error statement type for proto generation."""
+    original_content = stmt.get("original_line_content", "")
+    message = stmt.get("message", "Unknown parsing error")
+    return f"; ERROR IN ORIGINAL INPUT (L{stmt.get('line', '?')}): {message} -> {original_content}"
+
+
+def _proto_handle_unknown(stmt):
+    """Handle unknown statement types for proto generation."""
+    return f"; UNKNOWN_AST_STATEMENT_TYPE: {stmt.get('type')} - DATA: {stmt}"
+
+
 def generate_proto_from_ast(parsed_statements):
     """
     Generates a Proto-Language circuit description string from its AST.
@@ -188,87 +262,20 @@ def generate_proto_from_ast(parsed_statements):
     Returns:
         str: A string representing the reconstructed circuit description.
     """
-    output_lines = []
+    handlers = {
+        "declaration": _proto_handle_declaration,
+        "component_connection_block": _proto_handle_component_connection_block,
+        "direct_assignment": _proto_handle_direct_assignment,
+        "series_connection": _proto_handle_series_connection,
+        "error": _proto_handle_error,
+    }
 
+    output_lines = []
     for stmt in parsed_statements:
         stmt_type = stmt.get("type")
-        line_str = ""  # Initialize line string for the current statement
-
-        if stmt_type == "declaration":
-            line_str = f"{stmt['component_type']} {stmt['instance_name']}"
-
-        elif stmt_type == "component_connection_block":
-            assignments = []
-            for conn in stmt.get("connections", []):
-                assignments.append(f"{conn['terminal']}:({conn['node']})")
-            assignments_str = ", ".join(assignments)
-            # Ensure space after '{' and before '}' as per typical spec examples
-            line_str = f"{stmt['component_name']} {{ {assignments_str} }}"
-
-        elif stmt_type == "direct_assignment":
-            line_str = f"({stmt['source_node']}):({stmt['target_node']})"
-
-        elif stmt_type == "series_connection":
-            path_parts = []
-            for item in stmt.get("path", []):
-                item_type = item.get("type")
-                if item_type == "node":
-                    path_parts.append(f"({item['name']})")
-                elif item_type == "component":
-                    path_parts.append(item["name"])
-                elif item_type == "source":
-                    path_parts.append(f"{item['name']} ({item['polarity']})")
-                elif item_type == "named_current":
-                    path_parts.append(f"{item['direction']}{item['name']}")
-                elif item_type == "parallel_block":
-                    elements_strs = []
-                    for pel in item.get("elements", []):
-                        pel_type = pel.get("type")
-                        if pel_type == "component":
-                            elements_strs.append(pel["name"])
-                        elif pel_type == "controlled_source":
-                            elements_strs.append(
-                                f"{pel['expression']} ({pel['direction']})"
-                            )
-                        elif pel_type == "noise_source":
-                            elements_strs.append(f"{pel['id']} ({pel['direction']})")
-                        elif (
-                            pel_type == "error"
-                        ):  # If AST can contain errors within blocks
-                            elements_strs.append(
-                                f"<ERROR_IN_PARALLEL: {pel.get('message', 'Malformed element')}>"
-                            )
-                        else:
-                            elements_strs.append(f"<UNKNOWN_PARALLEL_TYPE: {pel_type}>")
-
-                    parallel_content = " || ".join(elements_strs)
-                    # Ensure space after '[' and before ']'
-                    path_parts.append(f"[ {parallel_content} ]")
-                elif item_type == "error":  # If AST can contain errors within paths
-                    path_parts.append(
-                        f"<ERROR_IN_PATH: {item.get('message', 'Malformed element')}>"
-                    )
-                else:
-                    path_parts.append(f"<UNKNOWN_PATH_TYPE: {item_type}>")
-
-            line_str = " -- ".join(path_parts)
-
-        elif (
-            stmt_type == "error"
-        ):  # If AST directly contains top-level error statements
-            # This assumes an error statement in the AST would signify a line that couldn't be parsed
-            # and we are just commenting it out or noting it.
-            original_content = stmt.get(
-                "original_line_content", ""
-            )  # if parser stores this
-            message = stmt.get("message", "Unknown parsing error")
-            line_str = f"; ERROR IN ORIGINAL INPUT (L{stmt.get('line', '?')}): {message} -> {original_content}"
-
-        else:
-            # Fallback for any unknown statement types in the AST
-            line_str = f"; UNKNOWN_AST_STATEMENT_TYPE: {stmt_type} - DATA: {stmt}"
-
-        if line_str:  # Add the reconstructed line if it's not empty
+        handler = handlers.get(stmt_type, _proto_handle_unknown)
+        line_str = handler(stmt)
+        if line_str:
             output_lines.append(line_str)
 
     return "\n".join(output_lines)
