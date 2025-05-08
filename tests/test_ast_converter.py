@@ -1,9 +1,12 @@
+# -*- coding: utf-8 -*-
+"""Tests for the AST converter functions."""
 from circuijt.ast_converter import ast_to_flattened_ast, flattened_ast_to_regular_ast
 from circuijt.parser import ProtoCircuitParser
 from circuijt.graph_utils import ast_to_graph, DSU
 
 
 def test_simple_series_flattening():
+    """Test flattening of a simple series circuit."""
     parser = ProtoCircuitParser()
     circuit = """
     R R1
@@ -35,6 +38,7 @@ def test_simple_series_flattening():
 
 
 def test_net_alias_preservation():
+    """Test that net aliases are preserved during flattening."""
     parser = ProtoCircuitParser()
     circuit = """
     R R1
@@ -73,7 +77,7 @@ def test_roundtrip_conversion():
     assert not errors
 
     # Step 1: AST -> Graph -> Flattened
-    graph, dsu = ast_to_graph(statements)
+    _graph, dsu = ast_to_graph(statements)
     flattened = ast_to_flattened_ast(statements, dsu)
 
     # Debug prints
@@ -87,7 +91,7 @@ def test_roundtrip_conversion():
     parallel_found = _check_parallel_structure(reconstructed)
 
     if not parallel_found:
-        print("\nDebug - All paths in reconstructed AST:")
+        print("\\nDebug - All paths in reconstructed AST:")
         for stmt in reconstructed:
             if stmt["type"] == "series_connection":
                 print(f"Path elements: {stmt['path']}")
@@ -142,6 +146,7 @@ def _check_parallel_structure(reconstructed):
 
 
 def test_internal_components_handling():
+    """Test handling of internal components like voltage sources."""
     parser = ProtoCircuitParser()
     circuit = """
     V V1
@@ -151,7 +156,7 @@ def test_internal_components_handling():
     statements, errors = parser.parse_text(circuit)
     assert not errors, f"Parser failed with errors: {errors}"
 
-    print("\nOriginal statements:")
+    print("\\nOriginal statements:")
     for stmt in statements:
         print(f"Statement type: {stmt['type']}")
         if stmt["type"] == "series_connection":
@@ -159,16 +164,16 @@ def test_internal_components_handling():
 
     graph, dsu = ast_to_graph(statements)
 
-    print("\nGraph structure:")
-    print(f"Nodes: {[n for n in graph.nodes()]}")
-    print(f"Edges: {[(u, v, d) for u, v, d in graph.edges(data=True)]}")
+    print("\\nGraph structure:")
+    print(f"Nodes: {list(graph.nodes())}")
+    print(f"Edges: {list(graph.edges(data=True))}")
 
     flattened = ast_to_flattened_ast(statements, dsu)
 
     # Check voltage source connections are preserved
     v1_pins = [p for p in flattened if p["type"] == "pin_connection" and p["component_instance"] == "V1"]
 
-    print("\nVoltage source connections:")
+    print("\\nVoltage source connections:")
     for pin in v1_pins:
         print(f"  {pin['component_instance']}.{pin['terminal']} -> {pin['net']}")
 
@@ -178,6 +183,7 @@ def test_internal_components_handling():
 
 
 def test_terminal_preservation():
+    """Test that component terminals are preserved during flattening."""
     parser = ProtoCircuitParser()
     circuit = """
     Nmos M1
@@ -188,9 +194,9 @@ def test_terminal_preservation():
 
     graph, dsu = ast_to_graph(statements)
 
-    print("\nGraph structure:")
-    print(f"Nodes: {[n for n in graph.nodes()]}")
-    edges = [(u, v, d) for u, v, d in graph.edges(data=True)]
+    print("\\nGraph structure:")
+    print(f"Nodes: {list(graph.nodes())}")
+    edges = list(graph.edges(data=True))
     print(f"Edges: {edges}")
 
     flattened = ast_to_flattened_ast(statements, dsu)
@@ -198,7 +204,7 @@ def test_terminal_preservation():
     # Check all MOSFET terminals preserved
     m1_pins = [p for p in flattened if p["type"] == "pin_connection" and p["component_instance"] == "M1"]
 
-    print("\nMOSFET terminal connections:")
+    print("\\nMOSFET terminal connections:")
     for pin in m1_pins:
         print(f"  {pin['terminal']} -> {pin['net']}")
 
@@ -229,7 +235,7 @@ def test_complex_series_parallel_flattening():
     parser = ProtoCircuitParser()
 
     # Load test circuit from file
-    with open("circuits/diffpair1.circuijt", "r") as f:
+    with open("circuits/diffpair1.circuijt", "r", encoding="utf-8") as f:
         test_circuit = f.read()
 
     ast = None
@@ -259,7 +265,7 @@ def test_complex_series_parallel_flattening():
 
         # 4. Verify net aliases are properly handled
         net_aliases = {stmt["source_net"]: stmt["canonical_net"] for stmt in flattened_ast if stmt["type"] == "net_alias"}
-        for source, canonical in net_aliases.items():
+        for _, canonical in net_aliases.items():
             assert canonical in {stmt["net"] for stmt in flattened_ast if stmt["type"] == "pin_connection"}
 
     except Exception as e:

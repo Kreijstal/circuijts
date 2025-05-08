@@ -8,6 +8,7 @@ from circuijt.graph_utils import ast_to_graph, graph_to_structured_ast
 
 @pytest.fixture
 def nmos_full_connection_circuit():
+    """Provides a test circuit string with a fully connected NMOS transistor."""
     return """
     ; Test circuit with a fully connected NMOS
     Nmos M1
@@ -27,48 +28,62 @@ def nmos_full_connection_circuit():
     """
 
 
-def test_nmos_reconstruction_maintains_arity(nmos_full_connection_circuit):
+def _parse_and_validate_circuit(circuit_text, parser, step_name=""):
+    """Helper function to parse and validate a circuit string."""
+    ast, parser_errors = parser.parse_text(circuit_text)
+    assert not parser_errors, f"Parser errors in {step_name} AST: {parser_errors}"
+    assert ast, f"{step_name} AST is empty."
+
+    validator = CircuitValidator(ast)
+    validation_errors, debug_info = validator.validate()
+    if validation_errors:
+        print(f"\\nValidation Errors for {step_name} AST:")
+        for error in validation_errors:
+            print(error)
+        if debug_info:  # debug_info might be None or empty
+            print(f"\\nDebug Info for {step_name} AST Validation:")
+            print(debug_info)
+    assert not validation_errors, f"Validation errors in {step_name} AST: {validation_errors}"
+    print(f"{step_name} AST validation successful.")
+    return ast
+
+
+def test_nmos_reconstruction_maintains_arity(
+    nmos_full_connection_circuit,  # pylint: disable=redefined-outer-name
+):
     """
     Tests that an NMOS transistor, when its connections are converted
     to a graph and then back to an AST, still passes arity validation.
     This ensures that graph_to_structured_ast correctly reconstructs
-    the component's connections in a way the validator understands.
+    the component\'s connections in a way the validator understands.
     """
     parser = ProtoCircuitParser()
 
-    # 1. Parse initial circuit to AST_1
-    ast_1, parser_errors_1 = parser.parse_text(nmos_full_connection_circuit)
-    assert not parser_errors_1, f"Parser errors in initial AST: {parser_errors_1}"
-    assert ast_1, "Initial AST (AST_1) is empty."
-
-    # Optional: Validate AST_1 (should pass)
-    validator_1 = CircuitValidator(ast_1)
-    validation_errors_1, _ = validator_1.validate()
-    assert not validation_errors_1, f"Validation errors in initial AST_1: {validation_errors_1}"
-    print("Initial AST_1 validation successful.")
+    # 1. Parse and validate initial circuit to AST_1
+    ast_1 = _parse_and_validate_circuit(nmos_full_connection_circuit, parser, "Initial AST_1")
 
     # 2. Convert AST_1 to Graph_1
-    print("\nConverting AST_1 to Graph_1...")
+    print("\\nConverting AST_1 to Graph_1...")
     graph_1, dsu_1 = ast_to_graph(ast_1)
     assert graph_1 is not None, "Graph_1 is None."
     print(f"Graph_1: {len(graph_1.nodes())} nodes, {len(graph_1.edges())} edges.")
 
     # 3. Convert Graph_1 back to AST_2
-    print("\nConverting Graph_1 to AST_2 (reconstructed)...")
+    print("\\nConverting Graph_1 to AST_2 (reconstructed)...")
     ast_2 = graph_to_structured_ast(graph_1, dsu_1)
     assert ast_2 is not None, "Reconstructed AST (AST_2) is None."
     print(f"AST_2 has {len(ast_2)} statements.")
 
     # 4. Validate AST_2
-    print("\nValidating reconstructed AST_2...")
+    print("\\nValidating reconstructed AST_2...")
     validator_2 = CircuitValidator(ast_2)
     validation_errors_2, debug_info_2 = validator_2.validate()
 
     if validation_errors_2:
-        print("\nValidation Errors for Reconstructed AST_2:")
+        print("\\nValidation Errors for Reconstructed AST_2:")
         for error in validation_errors_2:
             print(error)
-        print("\nDebug Info for AST_2 Validation:")
+        print("\\nDebug Info for AST_2 Validation:")
         print(debug_info_2)
 
     assert (

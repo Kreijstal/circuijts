@@ -20,7 +20,7 @@ def _process_parallel_elements(elements):
     return processed
 
 
-def _flatten_series_path(path_elements, context):
+def _flatten_series_path(path_elements, _context):
     """Helper function to flatten series path elements."""
     type_handlers = {
         "parallel_block": lambda e: {
@@ -271,7 +271,7 @@ def _find_net_pairs(pin_connections):
     return net_pairs
 
 
-def _build_ast_path(net1, net2, components, node_components, pin_connections):
+def _build_ast_path(net1, net2, components, _node_components, _pin_connections):
     """Build AST path segment between two nets."""
     if len(components) > 1:
         return {
@@ -285,7 +285,7 @@ def _build_ast_path(net1, net2, components, node_components, pin_connections):
                 {"type": "node", "name": net2},
             ],
         }
-    elif len(components) == 1:
+    if len(components) == 1:
         return {
             "type": "series_connection",
             "path": [
@@ -350,9 +350,9 @@ def _process_series_connection_element(element, prev_node, next_node):
     """Process an element within a series connection."""
     if element["type"] == "component":
         return _process_component_element(element, prev_node, next_node)
-    elif element["type"] == "source":
+    if element["type"] == "source":
         return _process_source_element(element, prev_node, next_node)
-    elif element["type"] == "parallel_block":
+    if element["type"] == "parallel_block":
         return _process_parallel_block(element, prev_node, next_node)
     return []
 
@@ -364,7 +364,7 @@ def ast_to_graph(parsed_statements, dsu_structure=None, debug=False):  # pylint:
     # First pass - process declarations and build DSU structure
     for statement in parsed_statements:
         if statement["type"] == "declaration":
-            dsu.add(statement["instance_name"])
+            dsu.add_set(statement["instance_name"])
 
     # Second pass - process connections and build graph edges
     edges = []
@@ -378,4 +378,4 @@ def ast_to_graph(parsed_statements, dsu_structure=None, debug=False):  # pylint:
                 prev_node, next_node = _find_adjacent_nodes(statement["path"], i)
                 edges.extend(_process_series_connection_element(element, prev_node, next_node))
 
-    return {"nodes": dsu.get_all(), "edges": edges}
+    return {"nodes": dsu.get_all_canonical_representatives(), "edges": edges}
