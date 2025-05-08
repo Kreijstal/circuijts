@@ -1,264 +1,307 @@
 # -*- coding: utf-8 -*-
-"""AST conversion utilities between regular and flattened representations."""
+"""AST conversion utilities."""
 
 from .graph_utils import ast_to_graph, graph_to_structured_ast, DSU
 import networkx as nx
 
-def ast_to_flattened_ast(regular_ast_statements, dsu):
-    """
-    Converts a regular AST (potentially with series/parallel constructs)
-    into a "flattened" AST consisting mainly of declarations and
-    direct pin-to-canonical_net connections.
-
-    Args:
-        regular_ast_statements (list): List of AST statements from parser or graph_to_structured_ast.
-        dsu (DSU): The Disjoint Set Union object containing canonical net mappings
-                   relevant to the `regular_ast_statements`.
-
-    Returns:
-        list: A list of "flattened" AST statements.
-    """
-    flattened_statements = []
-    # To quickly find existing declarations by instance name for updates
-    declaration_indices = {}
-    # To store original info, though graph node data might be more comprehensive for type
-    # declared_components_info = {}
-
-    # Pass 1: Process declarations from the input regular_ast_statements
-    for stmt in regular_ast_statements:
-        if stmt['type'] == 'declaration':
-            instance_name = stmt['instance_name']
-            decl_idx = len(flattened_statements)
-            flattened_statements.append({
-                'type': 'declaration',
-                'component_type': stmt['component_type'],
-                'instance_name': instance_name,
-                'line': stmt.get('line', 0)
-                # Preserve other attributes from original declaration if any
+def _flatten_series_path(path_elements, context):
+    """Helper function to flatten series path elements."""
+    flattened = []
+    for element in path_elements:
+        if element["type"] == "parallel_block":
+            parallel_elements = []
+            for parallel_element in element["elements"]:
+                if parallel_element["type"] == "component":
+                    parallel_elements.append({
+                        "type": "component_instance",
+                        "name": parallel_element["name"]
+                    })
+                elif parallel_element["type"] == "controlled_source":
+                    parallel_elements.append({
+                        "type": "controlled_source",
+                        "expression": parallel_element["expression"],
+                        "direction": parallel_element["direction"]
+                    })
+                elif parallel_element["type"] == "noise_source":
+                    parallel_elements.append({
+                        "type": "noise_source",
+                        "id": parallel_element["id"],
+                        "direction": parallel_element["direction"]
+                    })
+            flattened.append({
+                "type": "parallel_block",
+                "elements": parallel_elements
             })
-            declaration_indices[instance_name] = decl_idx
-            # declared_components_info[instance_name] = {
-            #     'type': stmt['component_type'],
-            #     'line': stmt.get('line', 0)
-            # }
-
-    # Generate graph from the same regular_ast_statements.
-    # The DSU from this graph build (`temp_dsu_for_graph`) is used internally by ast_to_graph
-    # to resolve net names to canonical forms *within the graph structure*.
-    # The `dsu` argument passed to *this function* is for interpreting net names
-    # when generating `net_alias` statements at the end.
-    graph, _ = ast_to_graph(regular_ast_statements)
-
-    # Pass 2: Iterate graph nodes. Add declarations for new internal components.
-    # Update existing declarations with details derived from graph (e.g., polarity for sources).
-    for node_name, node_data in graph.nodes(data=True):
-        if node_data.get('node_kind') == 'component_instance':
-            comp_instance_name = node_name
-            instance_graph_type = node_data.get('instance_type') # Type from graph node
-
-            if comp_instance_name.startswith("_internal_"):
-                # This is an internal component (e.g., controlled source from parallel block).
-                # Add its declaration if it wasn't somehow already present (e.g. if regular_ast was already flattened).
-                if comp_instance_name not in declaration_indices:
-                    internal_decl_attrs = {
-                        'expression': node_data.get('expression'),
-                        'direction': node_data.get('direction'),
-                        'id': node_data.get('id'),
-                        'polarity': node_data.get('polarity') # For internal V/I sources if any
-                    }
-                    internal_decl_stmt = {
-                        'type': 'declaration',
-                        'component_type': instance_graph_type,
-                        'instance_name': comp_instance_name,
-                        'internal': True,
-                        'line': node_data.get('line', 0), # Or a default line
-                        **{k:v for k,v in internal_decl_attrs.items() if v is not None}
-                    }
-                    flattened_statements.append(internal_decl_stmt)
-                    declaration_indices[comp_instance_name] = len(flattened_statements) - 1
-            else:
-                # This is a regular, user-declared component (e.g., "V1", "R1").
-                # Its declaration should ideally exist from Pass 1.
-                if comp_instance_name in declaration_indices:
-                    existing_decl_idx = declaration_indices[comp_instance_name]
-                    # Update it with info from graph if not already present (e.g., polarity for sources)
-                    if 'polarity' in node_data and 'polarity' not in flattened_statements[existing_decl_idx]:
-                        flattened_statements[existing_decl_idx]['polarity'] = node_data['polarity']
-                        # flattened_statements[existing_decl_idx]['_graph_augmented'] = True # Optional marker
-                else:
-                    # Anomaly: component in graph wasn't in original regular_ast declarations and isn't internal.
-                    # This might indicate an issue with the input regular_ast_statements.
-                    # ASTValidator should catch undeclared components if regular_ast was from parser.
-                    # If regular_ast itself was a transformation output, it might be missing a decl.
-                    print(f"Warning (ast_to_flattened_ast): Graph component '{comp_instance_name}' (type: {instance_graph_type}) "
-                          f"was not found in original declarations and is not an '_internal_' component. Adding a basic declaration.")
-                    basic_decl = {
-                        'type': 'declaration',
-                        'component_type': instance_graph_type,
-                        'instance_name': comp_instance_name,
-                        'line': node_data.get('line',0),
-                    }
-                    if 'polarity' in node_data: basic_decl['polarity'] = node_data['polarity']
-                    # Add other relevant attributes if available and appropriate
-                    flattened_statements.append(basic_decl)
-                    declaration_indices[comp_instance_name] = len(flattened_statements) - 1
+        elif element["type"] == "component":
+            flattened.append({
+                "type": "component_instance",
+                "name": element["name"]
+            })
+        elif element["type"] == "source":
+            flattened.append({
+                "type": "voltage_source",
+                "name": element["name"],
+                "polarity": element["polarity"]
+            })
+        elif element["type"] == "named_current":
+            flattened.append({
+                "type": "named_current",
+                "name": element["name"],
+                "direction": element["direction"]
+            })
+        elif element["type"] == "node":
+            flattened.append({
+                "type": "node",
+                "name": element["name"]
+            })
+    return flattened
 
 
-    # Pass 3: Add pin_connection statements from graph edges
-    component_pins_connected = set() # To avoid duplicate pin_connection entries
-    for node_name, node_data in graph.nodes(data=True): # Iterate components in graph
-        if node_data.get('node_kind') == 'component_instance':
-            comp_instance_name = node_name
-            
-            # Iterate over edges connected to this component instance
-            for _, neighbor_name, edge_data in graph.edges(comp_instance_name, data=True):
-                if graph.nodes[neighbor_name].get('node_kind') == 'electrical_net':
-                    terminal_name = edge_data.get('terminal')
-                    # neighbor_name is already a canonical net name from the graph construction (ast_to_graph)
-                    canonical_net_name = neighbor_name
-                    
-                    if terminal_name: # Ensure there is a terminal specified on the edge
-                        pin_key = (comp_instance_name, terminal_name, canonical_net_name) # Include net to distinguish multi-pin to same net
-                        if pin_key not in component_pins_connected:
-                            pin_conn = {
-                                'type': 'pin_connection',
-                                'component_instance': comp_instance_name,
-                                'terminal': terminal_name,
-                                'net': canonical_net_name,
-                                'line': 0 # Line number for pin connections is hard to trace back accurately
-                            }
-                            flattened_statements.append(pin_conn)
-                            component_pins_connected.add(pin_key)
+def ast_to_flattened_ast(ast, dsu=None):
+    """Convert a parsed AST to a flattened format for analysis."""
+    if dsu is None:
+        dsu = DSU()
 
-    # Pass 4: Add net aliases for equivalent nets, using the DSU passed into this function.
-    added_aliases = set()
-    # Ensure all nets involved in aliases are in DSU for find to work without auto-adding
-    # This can be done by iterating through all unique net names seen in pin_connections
-    # and adding them to the DSU if not present. Or assume the DSU is comprehensive.
-    for net_name_original_case in dsu.parent: # Iterate over all known net names in the DSU
-        canonical_net = dsu.find(net_name_original_case)
-        # Only add alias if the original name is different from its canonical form
-        # and this specific alias pair (order-insensitive) hasn't been added.
-        # Also, avoid aliasing a net to itself if it's already canonical.
-        if net_name_original_case != canonical_net:
-            alias_pair = tuple(sorted((net_name_original_case, canonical_net)))
-            if alias_pair not in added_aliases:
-                flattened_statements.append({
-                    'type': 'net_alias',
-                    'source_net': net_name_original_case, # The non-canonical name
-                    'canonical_net': canonical_net,    # Its canonical representative
-                    'line': 0
+    flattened = []
+
+    # Process declarations
+    for statement in ast:
+        if statement["type"] == "declaration":
+            flattened.append({
+                "type": "declaration",
+                "component_type": statement["component_type"],
+                "instance_name": statement["instance_name"]
+            })
+        elif statement["type"] == "component_connection_block":
+            for conn in statement["connections"]:
+                flattened.append({
+                    "type": "pin_connection",
+                    "component_instance": statement["component_name"],
+                    "terminal": conn["terminal"],
+                    "net": conn["node"]
                 })
-                added_aliases.add(alias_pair)
+        elif statement["type"] == "series_connection":
+            if "_invalid_start" not in statement:
+                nodes = [e for e in statement["path"] if e["type"] == "node"]
+                for i, element in enumerate(statement["path"]):
+                    if element["type"] == "node":
+                        canonical_net = dsu.find(element["name"])
+                        if canonical_net != element["name"]:
+                            flattened.append({
+                                "type": "net_alias",
+                                "source_net": element["name"],
+                                "canonical_net": canonical_net
+                            })
+                    elif element["type"] == "component":
+                        # Find adjacent nodes
+                        prev_node = None
+                        next_node = None
+                        for j in range(i-1, -1, -1):
+                            if statement["path"][j]["type"] == "node":
+                                prev_node = statement["path"][j]["name"]
+                                break
+                        for j in range(i+1, len(statement["path"])):
+                            if statement["path"][j]["type"] == "node":
+                                next_node = statement["path"][j]["name"]
+                                break
+                        if prev_node:
+                            flattened.append({
+                                "type": "pin_connection",
+                                "component_instance": element["name"],
+                                "terminal": "p1",
+                                "net": prev_node
+                            })
+                        if next_node:
+                            flattened.append({
+                                "type": "pin_connection",
+                                "component_instance": element["name"],
+                                "terminal": "p2",
+                                "net": next_node
+                            })
+                    elif element["type"] == "source":
+                        prev_node = None
+                        next_node = None
+                        for j in range(i-1, -1, -1):
+                            if statement["path"][j]["type"] == "node":
+                                prev_node = statement["path"][j]["name"]
+                                break
+                        for j in range(i+1, len(statement["path"])):
+                            if statement["path"][j]["type"] == "node":
+                                next_node = statement["path"][j]["name"]
+                                break
+                        terminal_map = {"-+": ("neg", "pos"), "+-": ("pos", "neg")}
+                        first_term, second_term = terminal_map[element["polarity"]]
+                        if prev_node:
+                            flattened.append({
+                                "type": "pin_connection",
+                                "component_instance": element["name"],
+                                "terminal": first_term,
+                                "net": prev_node
+                            })
+                        if next_node:
+                            flattened.append({
+                                "type": "pin_connection",
+                                "component_instance": element["name"],
+                                "terminal": second_term,
+                                "net": next_node
+                            })
+                    elif element["type"] == "parallel_block":
+                        prev_node = next_node = None
+                        for j in range(i-1, -1, -1):
+                            if statement["path"][j]["type"] == "node":
+                                prev_node = statement["path"][j]["name"]
+                                break
+                        for j in range(i+1, len(statement["path"])):
+                            if statement["path"][j]["type"] == "node":
+                                next_node = statement["path"][j]["name"]
+                                break
+                        
+                        for parallel_element in element["elements"]:
+                            if parallel_element["type"] == "component":
+                                if prev_node:
+                                    flattened.append({
+                                        "type": "pin_connection",
+                                        "component_instance": parallel_element["name"],
+                                        "terminal": "p1",
+                                        "net": prev_node
+                                    })
+                                if next_node:
+                                    flattened.append({
+                                        "type": "pin_connection",
+                                        "component_instance": parallel_element["name"],
+                                        "terminal": "p2",
+                                        "net": next_node
+                                    })
+        elif statement["type"] == "direct_assignment":
+            source = statement["source_node"]
+            target = statement["target_node"]
+            canonical = dsu.find(target)
+            if canonical != source:
+                flattened.append({
+                    "type": "net_alias",
+                    "source_net": source,
+                    "canonical_net": canonical
+                })
 
-    return flattened_statements
+    return flattened
 
-def flattened_ast_to_regular_ast(flattened_ast_statements):
-    """
-    Converts a "flattened" AST back into a regular, structured AST
-    (similar to what graph_to_structured_ast produces).
 
-    Args:
-        flattened_ast_statements (list): List of "flattened" AST statements.
+def _create_node_elements(elements):
+    """Helper function to create node elements for regular AST."""
+    node_elements = []
+    for element in elements:
+        if element["type"] == "node":
+            node_elements.append({
+                "type": "node",
+                "name": element["name"]
+            })
+        elif element["type"] == "component_instance":
+            node_elements.append({
+                "type": "component",
+                "name": element["name"]
+            })
+        elif element["type"] == "voltage_source":
+            node_elements.append({
+                "type": "source",
+                "name": element["name"],
+                "polarity": element["polarity"]
+            })
+        elif element["type"] == "named_current":
+            node_elements.append({
+                "type": "named_current",
+                "name": element["name"],
+                "direction": element["direction"]
+            })
+        elif element["type"] == "parallel_block":
+            parallel_elements = []
+            for parallel_element in element["elements"]:
+                if parallel_element["type"] == "component_instance":
+                    parallel_elements.append({
+                        "type": "component",
+                        "name": parallel_element["name"]
+                    })
+                elif parallel_element["type"] == "controlled_source":
+                    parallel_elements.append({
+                        "type": "controlled_source",
+                        "expression": parallel_element["expression"],
+                        "direction": parallel_element["direction"]
+                    })
+                elif parallel_element["type"] == "noise_source":
+                    parallel_elements.append({
+                        "type": "noise_source",
+                        "id": parallel_element["id"],
+                        "direction": parallel_element["direction"]
+                    })
+            node_elements.append({
+                "type": "parallel_block",
+                "elements": parallel_elements
+            })
+    return node_elements
 
-    Returns:
-        list: A list of regular AST statements.
-    """
-    reconstructed_graph = nx.MultiGraph()
-    reconstructed_dsu = DSU(preferred_roots={'GND', 'VDD'}) # Initialize with preferences
+
+def flattened_ast_to_regular_ast(flattened_ast):
+    """Convert a flattened AST back to regular format."""
+    regular_ast = []
     
-    declared_components_from_flat = {}
-    parallel_components = set()  # Track components that should be in parallel
-
-    # Pass 1: Populate DSU with all net names mentioned and process declarations
-    for stmt in flattened_ast_statements:
-        if stmt['type'] == 'declaration':
-            comp_type = stmt['component_type']
-            inst_name = stmt['instance_name']
-            
-            attrs_for_graph_node = {
-                'node_kind': 'component_instance',
-                'instance_type': comp_type,
-                'line': stmt.get('line', 0)
-            }
-            # For internal components, copy over behavioral attributes
-            if inst_name.startswith("_internal_"):
-                attrs_for_graph_node['internal'] = True
-                if 'expression' in stmt: attrs_for_graph_node['expression'] = stmt['expression']
-                if 'direction' in stmt: attrs_for_graph_node['direction'] = stmt['direction']
-                if 'id' in stmt: attrs_for_graph_node['id'] = stmt['id']
-            # For sources, copy polarity if present in declaration
-            if 'polarity' in stmt: attrs_for_graph_node['polarity'] = stmt['polarity']
-            
-            reconstructed_graph.add_node(inst_name, **attrs_for_graph_node)
-            declared_components_from_flat[inst_name] = {
-                'type': comp_type,
-                'line': stmt.get('line',0),
-                **{k:v for k,v in stmt.items() if k in ['expression', 'direction', 'id', 'polarity']}
-            }
-        elif stmt['type'] == 'pin_connection':
-            reconstructed_dsu.add_set(stmt['net'])
-        elif stmt['type'] == 'net_alias':
-            reconstructed_dsu.add_set(stmt['source_net'])
-            reconstructed_dsu.add_set(stmt['canonical_net'])
-
-    # Pass 2: Process net aliases to build DSU structure
-    for stmt in flattened_ast_statements:
-        if stmt['type'] == 'net_alias':
-            reconstructed_dsu.union(stmt['source_net'], stmt['canonical_net'])
-
-    # Pass 3: Process pin connections to build graph edges and identify parallel components
-    component_connections = {}  # Track component terminal connections
-    for stmt in flattened_ast_statements:
-        if stmt['type'] == 'pin_connection':
-            comp_instance = stmt['component_instance']
-            terminal = stmt['terminal']
-            net_from_pin_stmt = stmt['net']
-            canonical_net_for_connection = reconstructed_dsu.find(net_from_pin_stmt)
-
-            if not reconstructed_graph.has_node(canonical_net_for_connection):
-                reconstructed_graph.add_node(canonical_net_for_connection, node_kind='electrical_net')
-            
-            # Ensure component node exists
-            if not reconstructed_graph.has_node(comp_instance):
-                if comp_instance.startswith("_internal_"):
-                     print(f"Warning: Internal component {comp_instance} found in pin_connection, type info might be missing.")
-                     # Attempt to add the internal component node if missing, using info from declared_components_from_flat
-                     # This can happen if the flattened AST had a pin_connection for an internal component
-                     # whose declaration wasn't processed first or was missing.
-                     if comp_instance in declared_components_from_flat:
-                         decl_info = declared_components_from_flat[comp_instance]
-                         node_attrs = {'node_kind': 'component_instance', 'instance_type': decl_info['type']}
-                         # Add other relevant attributes if they were stored in declared_components_from_flat
-                         # or if we parse them from stmt (though stmt is pin_connection here)
-                         if 'expression' in decl_info: node_attrs['expression'] = decl_info['expression'] # Assuming decl_info might hold more
-                         if 'direction' in decl_info: node_attrs['direction'] = decl_info['direction']
-                         if 'id' in decl_info: node_attrs['id'] = decl_info['id']
-                         if 'polarity' in decl_info: node_attrs['polarity'] = decl_info['polarity']
-                         reconstructed_graph.add_node(comp_instance, **node_attrs)
- 
-            reconstructed_graph.add_edge(comp_instance, canonical_net_for_connection, key=terminal, terminal=terminal)
-
-            # Track component connections for parallel detection
-            if comp_instance not in component_connections:
-                component_connections[comp_instance] = set()
-            component_connections[comp_instance].add(canonical_net_for_connection)
-
-    # Identify parallel components by finding those connected to the same nets
-    for comp1, nets1 in component_connections.items():
-        if len(nets1) == 2:  # Only consider 2-terminal components for parallel groups
-            for comp2, nets2 in component_connections.items():
-                if comp1 < comp2 and nets1 == nets2:  # Use < to avoid duplicate pairs
-                    parallel_components.add(comp1)
-                    parallel_components.add(comp2)
-                    # Add parallel component attribute to graph nodes
-                    reconstructed_graph.nodes[comp1]['in_parallel'] = True
-                    reconstructed_graph.nodes[comp2]['in_parallel'] = True
-                    # Add shared nets attribute to help graph_to_structured_ast
-                    reconstructed_graph.nodes[comp1]['parallel_nets'] = list(nets1)
-                    reconstructed_graph.nodes[comp2]['parallel_nets'] = list(nets1)
-
-    # Pass 4: Call the existing graph_to_structured_ast with parallel info preserved
-    regular_ast = graph_to_structured_ast(reconstructed_graph, reconstructed_dsu)
+    # Group by type to reconstruct the AST
+    declarations = [s for s in flattened_ast if s["type"] == "declaration"]
+    pin_connections = [s for s in flattened_ast if s["type"] == "pin_connection"]
+    
+    # Process declarations
+    for decl in declarations:
+        regular_ast.append({
+            "type": "declaration",
+            "component_type": decl["component_type"],
+            "instance_name": decl["instance_name"]
+        })
+    
+    # Group pin connections by nodes
+    node_components = {}
+    for pin in pin_connections:
+        net = pin["net"]
+        if net not in node_components:
+            node_components[net] = []
+        node_components[net].append((pin["component_instance"], pin["terminal"]))
+    
+    # Find parallel structures
+    net_pairs = []
+    for pin in pin_connections:
+        for other_pin in pin_connections:
+            if (pin["component_instance"] == other_pin["component_instance"] and
+                pin["terminal"] != other_pin["terminal"]):
+                net_pair = tuple(sorted([pin["net"], other_pin["net"]]))
+                if net_pair not in net_pairs:
+                    net_pairs.append(net_pair)
+    
+    # Construct series paths with parallel blocks
+    for net1, net2 in net_pairs:
+        components = []
+        for comp, term in node_components.get(net1, []):
+            if any(p["component_instance"] == comp and p["net"] == net2 
+                  for p in pin_connections if p["terminal"] != term):
+                components.append(comp)
+        
+        if len(components) > 1:
+            # This is a parallel block
+            regular_ast.append({
+                "type": "series_connection",
+                "path": [
+                    {"type": "node", "name": net1},
+                    {"type": "parallel_block", "elements": [
+                        {"type": "component", "name": comp} for comp in components
+                    ]},
+                    {"type": "node", "name": net2}
+                ]
+            })
+        elif len(components) == 1:
+            # Single component
+            regular_ast.append({
+                "type": "series_connection",
+                "path": [
+                    {"type": "node", "name": net1},
+                    {"type": "component", "name": components[0]},
+                    {"type": "node", "name": net2}
+                ]
+            })
     
     return regular_ast
