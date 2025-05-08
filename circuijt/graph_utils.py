@@ -218,6 +218,39 @@ def _handle_series_connection(
     return implicit_node_idx, internal_component_idx
 
 
+def _handle_series_node(G, item, declared_components, electrical_nets_dsu):
+    """Handle node item in series path."""
+    node_name = item["name"]
+    new_attach_point = electrical_nets_dsu.find(node_name)
+    if not G.has_node(new_attach_point):
+        G.add_node(new_attach_point, node_kind="electrical_net")
+    if "." in node_name:
+        comp_part, term_part = node_name.split(".", 1)
+        if comp_part in declared_components:
+            G.add_edge(comp_part, new_attach_point, terminal=term_part)
+    return new_attach_point
+
+
+def _determine_next_attach_point(G, path, item_index, electrical_nets_dsu, implicit_node_idx):
+    """Determine the next attach point in series path."""
+    next_attach_point = None
+    created_new_implicit_node = False
+
+    if item_index + 1 < len(path) and path[item_index + 1].get("type") == "node":
+        next_node_name = path[item_index + 1]["name"]
+        next_attach_point = electrical_nets_dsu.find(next_node_name)
+    else:
+        implicit_node_name = f"_implicit_{implicit_node_idx}"
+        next_attach_point = electrical_nets_dsu.find(implicit_node_name)
+        if not G.has_node(next_attach_point):
+            created_new_implicit_node = True
+
+    if next_attach_point and not G.has_node(next_attach_point):
+        G.add_node(next_attach_point, node_kind="electrical_net")
+
+    return next_attach_point, created_new_implicit_node
+
+
 def _process_series_path_item(
     G,
     item,
@@ -233,31 +266,12 @@ def _process_series_path_item(
     item_type = item.get("type")
 
     if item_type == "node":
-        node_name = item["name"]
-        new_attach_point = electrical_nets_dsu.find(node_name)
-        if not G.has_node(new_attach_point):
-            G.add_node(new_attach_point, node_kind="electrical_net")
-        if "." in node_name:
-            comp_part, term_part = node_name.split(".", 1)
-            if comp_part in declared_components:
-                G.add_edge(comp_part, new_attach_point, terminal=term_part)
+        new_attach_point = _handle_series_node(G, item, declared_components, electrical_nets_dsu)
         return new_attach_point, implicit_node_idx, internal_component_idx
 
-    # Determine next attach point
-    next_attach_point = None
-    created_new_implicit_node = False
-
-    if item_index + 1 < len(path) and path[item_index + 1].get("type") == "node":
-        next_node_name = path[item_index + 1]["name"]
-        next_attach_point = electrical_nets_dsu.find(next_node_name)
-    else:
-        implicit_node_name = f"_implicit_{implicit_node_idx}"
-        next_attach_point = electrical_nets_dsu.find(implicit_node_name)
-        if not G.has_node(next_attach_point):  # Check before potential creation
-            created_new_implicit_node = True  # Mark for increment if used
-
-    if next_attach_point and not G.has_node(next_attach_point):
-        G.add_node(next_attach_point, node_kind="electrical_net")
+    next_attach_point, created_new_implicit_node = _determine_next_attach_point(
+        G, path, item_index, electrical_nets_dsu, implicit_node_idx
+    )
 
     # Handle different item types
     if item_type == "component":
@@ -274,9 +288,7 @@ def _process_series_path_item(
             internal_component_idx,
         )
 
-    if (
-        created_new_implicit_node and next_attach_point
-    ):  # Increment only if the implicit node was actually used as next_attach_point
+    if created_new_implicit_node and next_attach_point:
         implicit_node_idx += 1
 
     return next_attach_point, implicit_node_idx, internal_component_idx
