@@ -32,13 +32,9 @@ This document specifies a simple textual format for describing electronic circui
 *   **Component Connection Block (`{}`):**
     *   Provides a concise way to define multiple direct connections for a single component instance.
     *   Format: `InstanceName { Terminal1:(NodeA), Terminal2:(NodeB), ... }`
-    *   It can be written on a single line or split across multiple lines for readability:
+    *   It can only be written on a single line:
         ```circuijts
-        InstanceName {
-            Terminal1 : (NodeA),
-            Terminal2 : (NodeB),
-            Terminal3 : (NodeC)
-        }
+        InstanceName {Terminal1 : (NodeA),Terminal2 : (NodeB),Terminal3 : (NodeC)}
         ```
     *   `InstanceName`: The declared instance name of the component (e.g., `M_nfet1`, `U1A`).
     *   `{}`: Encloses the set of terminal assignments for this component instance.
