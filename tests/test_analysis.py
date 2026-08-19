@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for circuit short circuit analysis module."""
 
-import pytest
 from circuijt.parser import ProtoCircuitParser
 from circuijt.graph_utils import ast_to_graph
 from circuijt.analysis import detect_short_circuits, format_short_circuit_report
