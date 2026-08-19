@@ -9,7 +9,7 @@ import pprint  # Added for debug dumping
 from circuijt.analysis import detect_short_circuits, format_short_circuit_report
 from circuijt.graph_utils import ast_to_graph
 from circuijt.parser import ProtoCircuitParser
-from circuijt.validator import ASTValidator
+from circuijt.validator import CircuitValidator
 
 # Adjust path to import from circuijt module if script is in root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
@@ -63,7 +63,7 @@ def read_and_parse_circuit(args):
 
 
 def validate_circuit(ast, args):
-    validator = ASTValidator(ast)
+    validator = CircuitValidator(ast)
     validation_errors, _ = validator.validate()
     if validation_errors:
         print(f"\nStandard validation errors found in '{args.circuit_file}':")
